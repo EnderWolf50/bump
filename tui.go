@@ -46,8 +46,11 @@ var (
 	bgCursor       = lipgloss.Color("#262626")
 	bgPicked       = lipgloss.Color("#16241f")
 	bgCursorPicked = lipgloss.Color("#223a30")
-	bgChosen       = lipgloss.Color("#2b2215")
-	bgCursorChosen = lipgloss.Color("#40321d")
+	bgChosen       = lipgloss.Color("#3a2c12")
+	bgCursorChosen = lipgloss.Color("#4d3b19")
+
+	// A version picked below the latest is shown as a badge: dark on the accent color.
+	styleChosen = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#101010")).Background(colorAccent)
 )
 
 const sideWidth = 30
@@ -315,9 +318,9 @@ func (m *model) redraw() {
 		case r.picked:
 			box = paint(styleOK, "[x]")
 		}
-		if chosen {
-			box = paint(styleSource, "[v]") // picked at a chosen version, not the latest
-			to += paint(styleSource, " *")
+		if chosen { // picked at a version below the latest
+			box = paint(styleSource, "[v]")
+			to = styleChosen.Render(" "+r.to()+" ") + paint(styleSource, " *")
 		}
 		row := table.Row{mark + box, paint(styleSource, r.Source), paint(plain, r.ID), paint(plain, r.Current), to, change}
 		for c := range row {
@@ -531,6 +534,9 @@ func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.status = "pinned; to upgrade it: " + r.Pin
 		} else if ok {
 			r.picked = !r.picked
+			if !r.picked {
+				r.target = "" // unpicking also drops a chosen version
+			}
 		}
 		m.redraw()
 		return m, nil

@@ -179,6 +179,15 @@ func TestVersionPicker(t *testing.T) {
 	if got := strings.Join(jobFor(m.rows[0]).command(), " "); !strings.Contains(got, "--version 1.5.0") {
 		t.Fatalf("command %q does not ask for 1.5.0", got)
 	}
+	// A version below the latest shows as a badge on the accent color.
+	if to := m.table.Rows()[0][4]; !strings.Contains(to, "48;2;255;199;153") || !strings.Contains(ansi.Strip(to), "1.5.0") {
+		t.Fatalf("the chosen version is not a badge: %q", to)
+	}
+	// Unpicking drops the chosen version; picking again means the latest.
+	m, _ = press(m, "space")
+	if m.rows[0].picked || m.rows[0].target != "" {
+		t.Fatalf("after unpicking: %+v", m.rows[0])
+	}
 
 	// scoop has only the latest: no picker, a note instead.
 	m, _ = press(m, "j")
