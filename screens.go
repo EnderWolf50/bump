@@ -212,7 +212,6 @@ func (m model) startReview() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	width := m.review.Width()
-	idWidth := columns(width)[2].Width
 	var lines []string
 	majors := 0
 	for _, j := range jobs {
@@ -225,7 +224,7 @@ func (m model) startReview() (tea.Model, tea.Cmd) {
 			what += styleDim.Render("  chosen")
 		}
 		lines = append(lines, ansi.Truncate(fmt.Sprintf("%s %s  %s %s  %s", styleOK.Render("↑"),
-			styleSource.Render(fit(j.Source, 6)), fit(j.ID, idWidth), fit(j.Current, 16), what), width, "…"))
+			styleSource.Render(fit(j.Source, 6)), fit(j.ID, idWidth(width)), fit(j.Current, 16), what), width, "…"))
 	}
 	if majors > 0 {
 		lines = append(lines, "", styleBump[bumpMajor].Render(fmt.Sprintf("%d major update%s: check their release notes for breaking changes.",
@@ -368,7 +367,6 @@ func (m model) viewJobs() string {
 	}
 
 	width := m.w - stylePanel.GetHorizontalFrameSize()
-	idWidth := columns(width)[2].Width
 	// Rows that fit under the title, the bar and the help, scrolled to keep the running one.
 	room := max(m.h-stylePanel.GetVerticalFrameSize()-6, 1)
 	top := max(0, min(current-room/2, len(m.jobs)-room))
@@ -385,7 +383,7 @@ func (m model) viewJobs() string {
 		}
 		what := "→ " + j.to()
 		line := fmt.Sprintf("%s %s  %s %s  %s", icon,
-			styleSource.Render(fit(j.Source, 6)), fit(j.ID, idWidth), fit(what, 18), last)
+			styleSource.Render(fit(j.Source, 6)), fit(j.ID, idWidth(width)), fit(what, 18), last)
 		lines = append(lines, ansi.Truncate(line, width, "…"))
 	}
 

@@ -40,18 +40,25 @@ var (
 	styleFaint = lipgloss.NewStyle().Foreground(colorFaint)
 	styleTabOn = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
 	stylePanel = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorFaint).Padding(0, 1)
+
+	// Row backgrounds: the cursor row is a touch lighter, picked rows lean green, and a
+	// picked row under the cursor gets both.
+	bgCursor       = lipgloss.Color("#262626")
+	bgPicked       = lipgloss.Color("#16241f")
+	bgCursorPicked = lipgloss.Color("#223a30")
 )
 
 const sideWidth = 30
 
 // Lines of the right panel around the table: heading and filter above; a blank, the
-// divider, three detail lines and the help below.
-const tableChrome = 8
+// divider, two detail lines and the help below.
+const tableChrome = 7
 
 var bumpName = map[int]string{bumpMajor: "major", bumpMinor: "minor", bumpPatch: "patch", bumpOther: "?"}
 
 // columns fits the table to the panel: the package id takes what the fixed columns leave,
-// up to 40 cells. Every cell also gets one cell of padding on each side.
+// up to 40 cells. The widths include a cell of padding on each side, which redraw paints
+// itself so a row's background runs unbroken (the table's own padding would stay unpainted).
 func columns(width int) []table.Column {
 	cols := []table.Column{
 		{Title: "", Width: 4}, {Title: "FROM", Width: 6}, {Title: "PACKAGE"},
@@ -61,9 +68,19 @@ func columns(width int) []table.Column {
 	for _, c := range cols {
 		used += c.Width + 2
 	}
-	cols[2].Width = min(40, max(16, width-used-2))
+	cols[2].Width = min(40, max(16, width-used))
+	for i := range cols {
+		cols[i].Width += 2
+		cols[i].Title = " " + cols[i].Title
+	}
+	// The last column takes what is left, so a painted row reaches the panel's edge.
+	cols[len(cols)-1].Width += max(width-used-cols[2].Width+2, 0)
 	return cols
 }
+
+// idWidth is the package column's width without its padding, for screens that line up
+// with the table.
+func idWidth(width int) int { return columns(width)[2].Width - 2 }
 
 // row is one outdated package and whether to upgrade it; a pointer, so the choice survives
 // switching and filtering.
@@ -180,8 +197,9 @@ func newModel(srcs []source) model {
 	km.HalfPageUp = key.NewBinding(key.WithKeys("ctrl+u"))
 	km.HalfPageDown = key.NewBinding(key.WithKeys("ctrl+d"))
 	styles := table.DefaultStyles()
-	styles.Header = styles.Header.Foreground(lipgloss.Color("#8b8b8b")).BorderForeground(colorFaint)
-	styles.Selected = lipgloss.NewStyle() // the cursor is the "›" in the first column
+	styles.Header = styles.Header.Padding(0).Foreground(lipgloss.Color("#8b8b8b")).BorderForeground(colorFaint)
+	styles.Cell = lipgloss.NewStyle()     // redraw pads and paints every cell itself
+	styles.Selected = lipgloss.NewStyle() // the cursor row is painted by redraw too
 	m.table = table.New(table.WithColumns(columns(80)), table.WithKeyMap(km), table.WithStyles(styles), table.WithFocused(true))
 	m.refresh()
 	return m
@@ -252,27 +270,53 @@ func (m *model) refresh() tea.Cmd {
 }
 
 // redraw turns the shown rows into table cells; it runs after every cursor move or pick
-// because the cursor mark and the checkbox live in the cells.
+// because the cursor mark, the checkbox and the row colors live in the cells.
 func (m *model) redraw() {
 	cursor := min(m.table.Cursor(), max(len(m.shown)-1, 0))
+	cols := m.table.Columns()
 	cells := make([]table.Row, len(m.shown))
 	for i, r := range m.shown {
-		mark := " "
-		if i == cursor && m.inList {
-			mark = styleSource.Render("›")
+		onCursor := i == cursor && m.inList
+		// A background only holds up to the next reset, so every piece of the row is painted
+		// with it: each colored run and each cell's padding.
+		var bg lipgloss.Style
+		switch {
+		case onCursor && r.picked:
+			bg = bg.Background(bgCursorPicked)
+		case onCursor:
+			bg = bg.Background(bgCursor)
+		case r.picked:
+			bg = bg.Background(bgPicked)
+		}
+		paint := func(s lipgloss.Style, text string) string {
+			if c := bg.GetBackground(); c != nil {
+				s = s.Background(c)
+			}
+			return s.Render(text)
+		}
+		plain := lipgloss.NewStyle()
+
+		mark := paint(plain, " ")
+		if onCursor {
+			mark = paint(styleSource, "›")
 		}
 		level := bump(r.Current, r.to())
-		box, to, change := "[ ]", styleBump[level].Render(r.to()), styleBump[level].Render(bumpName[level])
+		box, to, change := paint(plain, "[ ]"), paint(styleBump[level], r.to()), paint(styleBump[level], bumpName[level])
 		switch {
 		case r.Pin != "":
-			box, to, change = styleDim.Render("pin"), styleDim.Render(r.Latest), styleDim.Render("pinned")
+			box, to, change = paint(styleDim, "pin"), paint(styleDim, r.Latest), paint(styleDim, "pinned")
 		case r.picked:
-			box = "[x]"
+			box = paint(styleOK, "[x]")
 		}
 		if r.target != "" && r.picked {
-			to += styleDim.Render(" *") // chosen, not the latest
+			to += paint(styleDim, " *") // chosen, not the latest
 		}
-		cells[i] = table.Row{mark + box, styleSource.Render(r.Source), r.ID, r.Current, to, change}
+		row := table.Row{mark + box, paint(styleSource, r.Source), paint(plain, r.ID), paint(plain, r.Current), to, change}
+		for c := range row {
+			w := cols[c].Width
+			row[c] = bg.Width(w).Padding(0, 1).Render(ansi.Truncate(row[c], max(w-2, 0), paint(plain, "…")))
+		}
+		cells[i] = row
 	}
 	m.table.SetRows(cells)
 	m.table.SetCursor(cursor)
@@ -618,15 +662,17 @@ func (m model) viewList() string {
 		filter = m.filter.View()
 	}
 
-	// The package under the cursor: where to read about it, what it is, and the change.
-	detail := make([]string, 3)
+	// The package under the cursor: what and from where, with its page; then the change and
+	// when the latest came out.
+	detail := make([]string, 2)
 	if r, ok := m.current(); ok {
 		in := m.infos[r.key()]
 		if in == nil {
 			in = &info{}
 		}
+		detail[0] = styleSource.Render(r.ID) + styleDim.Render("  from "+r.Source)
 		if link := in.d.link(); link != "" {
-			detail[0] = styleDim.Render("o  ") + link
+			detail[0] += "  " + link
 		}
 		released := ""
 		switch {
@@ -635,17 +681,16 @@ func (m model) viewList() string {
 		case !in.d.Released.IsZero():
 			released = "latest released " + in.d.Released.Local().Format("2006-01-02") + " · " + ago(in.d.Released, time.Now())
 		}
-		name := styleSource.Render(r.ID) + styleDim.Render("  "+r.Source)
-		gap := max(width-lipgloss.Width(name)-lipgloss.Width(released), 2)
-		detail[1] = name + strings.Repeat(" ", gap) + styleDim.Render(released)
 		level := bump(r.Current, r.to())
-		detail[2] = r.Current + styleDim.Render("  →  ") + styleBump[level].Render(r.to()+"  "+bumpName[level])
+		change := r.Current + styleDim.Render("  →  ") + styleBump[level].Render(r.to()+"  "+bumpName[level])
 		switch {
 		case r.Pin != "":
-			detail[2] = r.Current + styleDim.Render("  →  "+r.Latest+"  pinned · unpin with  "+r.Pin)
+			change = r.Current + styleDim.Render("  →  "+r.Latest+"  pinned · unpin with  "+r.Pin)
 		case r.target != "":
-			detail[2] += styleDim.Render("  (chosen; the latest is " + r.Latest + ")")
+			change += styleDim.Render("  (chosen; the latest is " + r.Latest + ")")
 		}
+		gap := max(width-lipgloss.Width(change)-lipgloss.Width(released), 2)
+		detail[1] = change + strings.Repeat(" ", gap) + styleDim.Render(released)
 	}
 	for i := range detail {
 		detail[i] = ansi.Truncate(detail[i], width, "…")

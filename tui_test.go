@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func press(m model, k string) (model, tea.Cmd) {
@@ -217,5 +219,32 @@ func TestViewAtAnySize(t *testing.T) {
 		s.picker = nil
 		s, _ = press(s, "s")
 		s.View()
+	}
+}
+
+// A background holds only until the next reset, so the cursor row must paint every run of
+// text itself, padding and the panel's full width included.
+func TestCursorRowPaintedEdgeToEdge(t *testing.T) {
+	token := regexp.MustCompile(`\x1b\[([0-9;]*)m|[^\x1b]+`)
+	for _, w := range []int{90, 120, 200} {
+		m := loaded()
+		next, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 20})
+		m, _ = press(next.(model), "enter")
+		for _, line := range strings.Split(m.table.View(), "\n") {
+			if !strings.Contains(ansi.Strip(line), "Git.Git") {
+				continue
+			}
+			active, bare := false, 0
+			for _, tok := range token.FindAllStringSubmatch(line, -1) {
+				if strings.HasPrefix(tok[0], "\x1b") {
+					active = tok[1] != "" && tok[1] != "0" && (active || strings.Contains(tok[1], "48;"))
+				} else if !active {
+					bare += len(tok[0])
+				}
+			}
+			if bare > 0 {
+				t.Errorf("width %d: %d cells of the cursor row have no background", w, bare)
+			}
+		}
 	}
 }
