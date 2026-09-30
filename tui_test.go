@@ -125,10 +125,10 @@ func TestModel(t *testing.T) {
 		t.Fatal("picked a pinned package")
 	}
 
-	// enter saves into the review first; esc returns, enter again starts the run.
+	// s saves into the review first; esc returns, and enter in the review starts the run.
 	var ran []string
 	m.runJobs = fakeRun(&ran, "7zip")
-	m, _ = press(m, "enter")
+	m, _ = press(m, "s")
 	if !m.reviewing || m.jobs != nil {
 		t.Fatal("save did not stop at the review")
 	}
@@ -160,9 +160,9 @@ func TestModel(t *testing.T) {
 func TestVersionPicker(t *testing.T) {
 	m := loaded()
 	m, _ = press(m, "enter") // the table, cursor on Git.Git
-	m, _ = press(m, "v")
+	m, _ = press(m, "enter") // enter opens the picker, like v
 	if m.picker == nil || !m.picker.loading {
-		t.Fatal("v did not open the picker")
+		t.Fatal("enter did not open the picker")
 	}
 	next, _ := m.Update(versionsMsg{"winget/Git.Git", []release{{Version: "3.0.0"}, {Version: "2.1.0"}, {Version: "1.5.0"}}, nil})
 	m = next.(model)
