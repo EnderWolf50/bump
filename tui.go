@@ -14,6 +14,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -26,7 +27,7 @@ var (
 	colorBad    = lipgloss.Color("#ff8080")
 
 	styleSource = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
-	// The latest version is colored by how far it jumps; see bump.
+	// A version is colored by how far it jumps; see bump.
 	styleBump = map[int]lipgloss.Style{
 		bumpMajor: lipgloss.NewStyle().Foreground(colorBad),
 		bumpMinor: lipgloss.NewStyle().Foreground(colorAccent),
@@ -39,7 +40,6 @@ var (
 	styleFaint = lipgloss.NewStyle().Foreground(colorFaint)
 	styleTabOn = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
 	stylePanel = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorFaint).Padding(0, 1)
-	styleModal = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBad).Padding(1, 3)
 )
 
 const sideWidth = 30
@@ -55,7 +55,7 @@ var bumpName = map[int]string{bumpMajor: "major", bumpMinor: "minor", bumpPatch:
 func columns(width int) []table.Column {
 	cols := []table.Column{
 		{Title: "", Width: 4}, {Title: "FROM", Width: 6}, {Title: "PACKAGE"},
-		{Title: "CURRENT", Width: 16}, {Title: "LATEST", Width: 16}, {Title: "CHANGE", Width: 6},
+		{Title: "CURRENT", Width: 16}, {Title: "TO", Width: 16}, {Title: "CHANGE", Width: 6},
 	}
 	used := 0
 	for _, c := range cols {
@@ -65,13 +65,32 @@ func columns(width int) []table.Column {
 	return cols
 }
 
-// row is one outdated package; a pointer, so a pick survives switching and filtering.
+// action is what saving does to a row.
+type action int
+
+const (
+	actNone action = iota
+	actUpgrade
+	actRemove
+)
+
+// row is one outdated package and what to do with it; a pointer, so the choice survives
+// switching and filtering.
 type row struct {
 	pkg
-	picked bool
+	act    action
+	target string // a version chosen in the version picker; "" means the latest
 }
 
 func (r *row) key() string { return r.Source + "/" + r.ID }
+
+// to is the version an upgrade goes to.
+func (r *row) to() string {
+	if r.target != "" {
+		return r.target
+	}
+	return r.Latest
+}
 
 // loadedMsg is one package manager's answer, arriving whenever it is ready.
 type loadedMsg struct {
@@ -105,28 +124,16 @@ type info struct {
 	loading bool
 }
 
-// job is one upgrade on the progress screen.
-type job struct {
-	pkg
-	state int
-	last  string // the latest output line
-}
-
-const (
-	jobQueued = iota
-	jobRunning
-	jobOK
-	jobFailed
-)
-
 var (
-	keyPick   = key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "pick"))
-	keyAll    = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "pick all shown"))
-	keyFilter = key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter"))
-	keyOpen   = key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open page"))
-	keySave   = key.NewBinding(key.WithKeys("enter", "s"), key.WithHelp("enter/s", "save"))
-	keyBack   = key.NewBinding(key.WithKeys("left", "h", "esc", "q"), key.WithHelp("←/h/esc/q", "back"))
-	keyCheck  = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh"))
+	keyPick     = key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "upgrade"))
+	keyRemove   = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "uninstall"))
+	keyVersions = key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "version"))
+	keyAll      = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "upgrade all shown"))
+	keyFilter   = key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter"))
+	keyOpen     = key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open page"))
+	keySave     = key.NewBinding(key.WithKeys("enter", "s"), key.WithHelp("enter/s", "save"))
+	keyBack     = key.NewBinding(key.WithKeys("left", "h", "esc", "q"), key.WithHelp("←/h/esc/q", "back"))
+	keyRefresh  = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh"))
 )
 
 type model struct {
@@ -144,15 +151,18 @@ type model struct {
 	w, h    int    // terminal size
 	status  string // a one-off note next to the heading, cleared by the next key
 
-	confirmQuit bool // the quit dialog is open
+	// At most one of these is open, over or instead of the picking screen.
+	confirmQuit bool           // the quit dialog
+	picker      *picker        // the version picker
+	reviewing   bool           // the list of what saving will do, before it starts
+	review      viewport.Model //
+	jobs        []job          // the progress screen, from the start of the run
 
-	// The progress screen, while jobs is not nil.
-	jobs     []job
 	running  bool
 	ch       chan tea.Msg
 	cancel   context.CancelFunc
 	progress progress.Model
-	runJobs  func(context.Context, []pkg, chan<- tea.Msg) // replaced in tests
+	runJobs  func(context.Context, []job, chan<- tea.Msg) // replaced in tests
 }
 
 func newModel(srcs []source) model {
@@ -161,6 +171,7 @@ func newModel(srcs []source) model {
 		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		filter:   textinput.New(),
 		help:     help.New(),
+		review:   viewport.New(),
 		progress: progress.New(progress.WithColors(colorAccent, colorOK)),
 		runJobs:  runJobs,
 		started:  time.Now(),
@@ -205,10 +216,11 @@ func (m *model) check(name string) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// picked counts the rows of one manager (or "all") that saving will act on.
 func (m model) picked(source string) int {
 	n := 0
 	for _, r := range m.rows {
-		if r.picked && (source == "all" || r.Source == source) {
+		if r.act != actNone && (source == "all" || r.Source == source) {
 			n++
 		}
 	}
@@ -233,7 +245,7 @@ func (m model) busy() bool {
 			return true
 		}
 	}
-	return m.running
+	return m.running || (m.picker != nil && m.picker.loading)
 }
 
 // refresh recomputes which rows the table shows and starts a lookup for the new cursor row.
@@ -255,19 +267,24 @@ func (m *model) redraw() {
 	cursor := min(m.table.Cursor(), max(len(m.shown)-1, 0))
 	cells := make([]table.Row, len(m.shown))
 	for i, r := range m.shown {
-		mark, box := " ", "[ ]"
+		mark := " "
 		if i == cursor && m.inList {
 			mark = styleSource.Render("›")
 		}
-		if r.picked {
+		level := bump(r.Current, r.to())
+		box, to, change := "[ ]", styleBump[level].Render(r.to()), styleBump[level].Render(bumpName[level])
+		switch {
+		case r.act == actRemove:
+			box, to, change = styleErr.Render("[-]"), styleErr.Render("uninstall"), ""
+		case r.Pin != "":
+			box, to, change = styleDim.Render("pin"), styleDim.Render(r.Latest), styleDim.Render("pinned")
+		case r.act == actUpgrade:
 			box = "[x]"
 		}
-		level := bump(r.Current, r.Latest)
-		latest, change := styleBump[level].Render(r.Latest), styleBump[level].Render(bumpName[level])
-		if r.Pin != "" {
-			box, latest, change = styleDim.Render("pin"), styleDim.Render(r.Latest), styleDim.Render("pinned")
+		if r.target != "" && r.act == actUpgrade {
+			to += styleDim.Render(" *") // chosen, not the latest
 		}
-		cells[i] = table.Row{mark + box, styleSource.Render(r.Source), r.ID, r.Current, latest, change}
+		cells[i] = table.Row{mark + box, styleSource.Render(r.Source), r.ID, r.Current, to, change}
 	}
 	m.table.SetRows(cells)
 	m.table.SetCursor(cursor)
@@ -311,6 +328,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filter.SetWidth(width - 2)
 		m.help.SetWidth(width)
 		m.progress.SetWidth(m.w - frameW)
+		m.review.SetWidth(m.w - frameW)
+		m.review.SetHeight(max(m.h-frameH-3, 1)) // under the title and a blank, above the help
+		if m.picker != nil {
+			m.picker.resize(m.w, m.h)
+		}
 		m.redraw()
 	case spinner.TickMsg:
 		if !m.busy() {
@@ -320,19 +342,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 	case loadedMsg:
-		// Keep the rows grouped in sidebar order, whoever answers first.
-		// A new answer replaces the manager's rows; picks carry over by package.
-		byName, wasPicked := map[string][]*row{}, map[string]bool{}
+		// Keep the rows grouped in sidebar order, whoever answers first. A new answer
+		// replaces the manager's rows; choices carry over by package.
+		byName, was := map[string][]*row{}, map[string]*row{}
 		for _, r := range m.rows {
 			if r.Source == msg.source {
-				wasPicked[r.ID] = r.picked
+				was[r.ID] = r
 				delete(m.infos, r.key())
 				continue
 			}
 			byName[r.Source] = append(byName[r.Source], r)
 		}
 		for _, p := range msg.pkgs {
-			byName[msg.source] = append(byName[msg.source], &row{pkg: p, picked: wasPicked[p.ID] && p.Pin == ""})
+			r := &row{pkg: p}
+			if old := was[p.ID]; old != nil {
+				r.act, r.target = old.act, old.target
+				if r.act == actUpgrade && p.Pin != "" {
+					r.act, r.target = actNone, ""
+				}
+			}
+			byName[msg.source] = append(byName[msg.source], r)
 		}
 		m.rows = nil
 		for i := range m.tabs {
@@ -345,24 +374,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case infoMsg:
 		m.infos[msg.key] = &info{d: msg.d, err: msg.err}
 		return m, nil
-	case jobStartMsg:
-		m.jobs[msg.i].state = jobRunning
-		return m, waitJob(m.ch)
-	case jobLineMsg:
-		m.jobs[msg.i].last = msg.text
-		return m, waitJob(m.ch)
-	case jobDoneMsg:
-		m.jobs[msg.i].state = jobOK
-		if msg.err != nil {
-			m.jobs[msg.i].state = jobFailed
-			if m.jobs[msg.i].last == "" {
-				m.jobs[msg.i].last = msg.err.Error()
-			}
+	case versionsMsg:
+		if m.picker != nil && m.picker.row.key() == msg.key {
+			m.picker.fill(msg.releases, msg.err)
 		}
-		return m, waitJob(m.ch)
-	case allDoneMsg:
-		m.running = false
 		return m, nil
+	case jobStartMsg, jobLineMsg, jobDoneMsg, allDoneMsg:
+		return m.updateRun(msg)
 	case tea.KeyPressMsg:
 		m.status = ""
 		if msg.String() == "ctrl+c" {
@@ -374,8 +392,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case m.confirmQuit:
 			return m.updateQuit(msg)
+		case m.picker != nil:
+			return m.updatePicker(msg)
 		case m.jobs != nil:
 			return m.updateJobs(msg)
+		case m.reviewing:
+			return m.updateReview(msg)
 		case m.filter.Focused():
 			return m.updateFilter(msg)
 		case m.inList:
@@ -389,51 +411,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// save starts the upgrades of the picked packages and switches to the progress screen.
-func (m model) save() (tea.Model, tea.Cmd) {
-	var pkgs []pkg
-	for _, r := range m.rows {
-		if r.picked {
-			pkgs = append(pkgs, r.pkg)
-			m.jobs = append(m.jobs, job{pkg: r.pkg})
-		}
-	}
-	if len(pkgs) == 0 {
-		m.status = "nothing picked yet: space picks a package"
-		return m, nil
-	}
-	var ctx context.Context
-	ctx, m.cancel = context.WithCancel(context.Background())
-	m.ch = make(chan tea.Msg)
-	m.running = true
-	go m.runJobs(ctx, pkgs, m.ch)
-	return m, tea.Batch(waitJob(m.ch), m.spinner.Tick)
-}
-
-// The quit dialog: quit, save instead, or anything else to stay.
-func (m model) updateQuit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.confirmQuit = false
-	switch msg.String() {
-	case "q", "y":
-		return m, tea.Quit
-	case "s", "enter":
-		return m.save()
-	}
-	return m, nil
-}
-
 // The sidebar picks a manager; enter hands the keys to its table.
 func (m model) updateSide(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "esc":
-		// Quitting drops the picks, so with some picked it asks first.
+		// Quitting drops the choices, so with some made it asks first.
 		if m.picked("all") > 0 {
 			m.confirmQuit = true
 			return m, nil
 		}
 		return m, tea.Quit
 	case "s":
-		return m.save()
+		return m.startReview()
 	case "r":
 		return m, m.check(m.tabs[m.on].name)
 	case "up", "k":
@@ -472,8 +461,9 @@ func (m model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, m.refresh())
 }
 
-// The table: pick packages, filter them, save; ←/h/esc/q go back to the sidebar.
+// The table: choose what to do with packages, filter them, save; ←/h/esc/q go back.
 func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	r, ok := m.current()
 	switch {
 	case key.Matches(msg, keyBack): // one level up: first out of a filter, then to the sidebar
 		if m.filter.Value() != "" {
@@ -484,13 +474,13 @@ func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.redraw()
 		return m, nil
 	case key.Matches(msg, keySave):
-		return m.save()
-	case key.Matches(msg, keyCheck):
+		return m.startReview()
+	case key.Matches(msg, keyRefresh):
 		return m, m.check(m.tabs[m.on].name)
 	case key.Matches(msg, keyFilter):
 		return m, m.filter.Focus()
 	case key.Matches(msg, keyOpen):
-		if r, ok := m.current(); ok {
+		if ok {
 			if in := m.infos[r.key()]; in != nil && in.d.link() != "" {
 				// rundll32 hands the URL to the default browser; `start` would trip over &.
 				exec.Command("rundll32", "url.dll,FileProtocolHandler", in.d.link()).Start()
@@ -500,22 +490,37 @@ func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.status = "no page known for this package"
 		return m, nil
 	case key.Matches(msg, keyPick):
-		if r, ok := m.current(); ok {
-			if r.Pin != "" {
-				m.status = "pinned; to upgrade it: " + r.Pin
-				return m, nil
-			}
-			r.picked = !r.picked
-			m.redraw()
+		if ok && r.Pin != "" {
+			m.status = "pinned; to upgrade it: " + r.Pin
+		} else if ok && r.act == actUpgrade {
+			r.act, r.target = actNone, ""
+		} else if ok {
+			r.act = actUpgrade
+		}
+		m.redraw()
+		return m, nil
+	case key.Matches(msg, keyRemove):
+		if ok && r.act == actRemove {
+			r.act = actNone
+		} else if ok {
+			r.act, r.target = actRemove, ""
+		}
+		m.redraw()
+		return m, nil
+	case key.Matches(msg, keyVersions):
+		if ok {
+			return m.openPicker(r)
 		}
 		return m, nil
-	case key.Matches(msg, keyAll): // what the table shows, pinned aside; unpicks if all are
+	case key.Matches(msg, keyAll): // upgrade what the table shows; if all are, undo that
 		all := true
 		for _, r := range m.shown {
-			all = all && (r.picked || r.Pin != "")
+			all = all && (r.act == actUpgrade || r.Pin != "")
 		}
 		for _, r := range m.shown {
-			r.picked = !all && r.Pin == ""
+			if r.Pin == "" && r.act != actRemove {
+				r.act, r.target = map[bool]action{true: actNone, false: actUpgrade}[all], ""
+			}
 		}
 		m.redraw()
 		return m, nil
@@ -526,60 +531,31 @@ func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, m.lookUp())
 }
 
-// The progress screen: nothing to do while it runs (ctrl+c aborts); afterwards, back or quit.
-func (m model) updateJobs(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.running {
-		return m, nil
-	}
-	switch msg.String() {
-	case "q":
-		return m, tea.Quit
-	case "enter", "esc":
-		// Back to the table without what was upgraded; the failures stay, unpicked.
-		upgraded := map[pkg]bool{}
-		for _, j := range m.jobs {
-			upgraded[j.pkg] = j.state == jobOK
-		}
-		var rows []*row
-		for _, r := range m.rows {
-			if !upgraded[r.pkg] {
-				r.picked = false
-				rows = append(rows, r)
-			}
-		}
-		m.rows, m.jobs = rows, nil
-		return m, m.refresh()
-	}
-	return m, nil
-}
-
 func (m model) View() tea.View {
+	v := tea.NewView("")
+	v.AltScreen = true
 	if m.w == 0 { // the first frame comes before the terminal's size is known
-		v := tea.NewView("")
-		v.AltScreen = true
 		return v
 	}
-	content := m.viewPick()
-	if m.jobs != nil {
-		content = m.viewJobs()
+	switch {
+	case m.jobs != nil:
+		v.Content = m.viewJobs()
+	case m.reviewing:
+		v.Content = m.viewReview()
+	default:
+		v.Content = m.viewPick()
 	}
-	if m.confirmQuit {
-		content = m.overQuitDialog(content)
+	switch {
+	case m.confirmQuit:
+		v.Content = m.overlay(v.Content, m.quitDialog())
+	case m.picker != nil:
+		v.Content = m.overlay(v.Content, m.picker.view(m.spinner.View()))
 	}
-	v := tea.NewView(content)
-	v.AltScreen = true
 	return v
 }
 
-// overQuitDialog draws the quit question in a box over the middle of the screen.
-func (m model) overQuitDialog(under string) string {
-	n := m.picked("all")
-	box := styleModal.Render(lipgloss.JoinVertical(lipgloss.Center,
-		styleErr.Bold(true).Render("Quit without upgrading?"),
-		"",
-		fmt.Sprintf("%d picked package%s will not be upgraded.", n, map[bool]string{true: "", false: "s"}[n == 1]),
-		"",
-		styleDim.Render("q/y quit · s save and upgrade · esc stay")))
+// overlay draws a box over the middle of the screen.
+func (m model) overlay(under, box string) string {
 	x := max((m.w-lipgloss.Width(box))/2, 0)
 	y := max((m.h-lipgloss.Height(box))/2, 0)
 	return lipgloss.NewCompositor(
@@ -591,7 +567,7 @@ func (m model) overQuitDialog(under string) string {
 func (m model) viewPick() string {
 	var side []string
 	for i, t := range m.tabs {
-		// name, then picked/outdated or the manager's state
+		// name, then chosen/outdated or the manager's state
 		var count string
 		switch {
 		case t.loading:
@@ -656,7 +632,7 @@ func (m model) viewList() string {
 	case t.err != nil:
 		heading += styleErr.Render(" · check failed")
 	default:
-		heading += styleDim.Render(fmt.Sprintf(" · %d outdated · %d picked", len(m.shown), m.picked(t.name)))
+		heading += styleDim.Render(fmt.Sprintf(" · %d outdated · %d chosen", len(m.shown), m.picked(t.name)))
 	}
 	if m.status != "" {
 		heading += "  " + styleErr.Render(m.status)
@@ -667,43 +643,41 @@ func (m model) viewList() string {
 		filter = m.filter.View()
 	}
 
-	// The package under the cursor: which, from what to what, and where to read about it.
+	// The package under the cursor: where to read about it, what it is, and the change.
 	detail := make([]string, 3)
 	if r, ok := m.current(); ok {
-		level := bump(r.Current, r.Latest)
 		in := m.infos[r.key()]
 		if in == nil {
 			in = &info{}
+		}
+		if link := in.d.link(); link != "" {
+			detail[0] = styleDim.Render("o  ") + link
 		}
 		released := ""
 		switch {
 		case in.loading:
 			released = "looking up the release " + m.spinner.View()
 		case !in.d.Released.IsZero():
-			released = "released " + in.d.Released.Local().Format("2006-01-02") + " · " + ago(in.d.Released, time.Now())
-		}
-		if link := in.d.link(); link != "" {
-			detail[0] = styleDim.Render("o  ") + link
+			released = "latest released " + in.d.Released.Local().Format("2006-01-02") + " · " + ago(in.d.Released, time.Now())
 		}
 		name := styleSource.Render(r.ID) + styleDim.Render("  "+r.Source)
 		gap := max(width-lipgloss.Width(name)-lipgloss.Width(released), 2)
 		detail[1] = name + strings.Repeat(" ", gap) + styleDim.Render(released)
-		detail[2] = r.Current + styleDim.Render("  →  ") + styleBump[level].Render(r.Latest+"  "+bumpName[level])
-		if r.Pin != "" {
+		level := bump(r.Current, r.to())
+		detail[2] = r.Current + styleDim.Render("  →  ") + styleBump[level].Render(r.to()+"  "+bumpName[level])
+		switch {
+		case r.act == actRemove:
+			detail[2] = r.Current + styleErr.Render("  →  uninstall")
+		case r.Pin != "":
 			detail[2] = r.Current + styleDim.Render("  →  "+r.Latest+"  pinned · unpin with  "+r.Pin)
+		case r.target != "":
+			detail[2] += styleDim.Render("  (chosen; the latest is " + r.Latest + ")")
 		}
 	}
 	for i := range detail {
 		detail[i] = ansi.Truncate(detail[i], width, "…")
 	}
 
-	keys := []key.Binding{m.table.KeyMap.LineUp, m.table.KeyMap.LineDown, keyPick, keySave, keyBack, keyAll, keyFilter, keyOpen, keyCheck}
-	if m.filter.Focused() {
-		keys = []key.Binding{
-			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "keep filter")),
-			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter")),
-		}
-	}
 	// Instead of an empty table, say why it is empty.
 	body := m.table.View()
 	var note []string
@@ -720,11 +694,19 @@ func (m model) viewList() string {
 	}
 	if note != nil {
 		for i := range note {
-			note[i] = ansi.Truncate(note[i], width-4, "…")
+			note[i] = ansi.Truncate(note[i], max(width-4, 0), "…")
 		}
 		body = lipgloss.Place(width, lipgloss.Height(body), lipgloss.Center, lipgloss.Center, strings.Join(note, "\n"))
 	}
 
+	keys := []key.Binding{m.table.KeyMap.LineUp, m.table.KeyMap.LineDown, keyPick, keyRemove, keyVersions,
+		keySave, keyBack, keyAll, keyFilter, keyOpen, keyRefresh}
+	if m.filter.Focused() {
+		keys = []key.Binding{
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "keep filter")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter")),
+		}
+	}
 	return strings.Join([]string{
 		ansi.Truncate(heading, width, "…"),
 		filter,
@@ -733,56 +715,4 @@ func (m model) viewList() string {
 		strings.Join(detail, "\n"),
 		ansi.Truncate(m.help.ShortHelpView(keys), width, "…"),
 	}, "\n")
-}
-
-func (m model) viewJobs() string {
-	done, failed, current := 0, 0, 0
-	for i, j := range m.jobs {
-		switch j.state {
-		case jobOK:
-			done++
-		case jobFailed:
-			done++
-			failed++
-		case jobRunning:
-			current = i
-		}
-	}
-	title := fmt.Sprintf("Upgrading %d of %d", min(done+1, len(m.jobs)), len(m.jobs))
-	help := "ctrl+c abort"
-	if !m.running {
-		title = fmt.Sprintf("Done: %d upgraded, %d failed", done-failed, failed)
-		help = "enter/esc back to the list · q quit"
-		if done < len(m.jobs) {
-			title += fmt.Sprintf(", %d not run", len(m.jobs)-done)
-		}
-	}
-
-	width := m.w - stylePanel.GetHorizontalFrameSize()
-	idWidth := columns(width)[2].Width
-	// Rows that fit under the title, the bar and the help, scrolled to keep the running one.
-	room := max(m.h-stylePanel.GetVerticalFrameSize()-6, 1)
-	top := max(0, min(current-room/2, len(m.jobs)-room))
-	var lines []string
-	for _, j := range m.jobs[top:min(top+room, len(m.jobs))] {
-		icon, last := styleDim.Render("·"), styleDim.Render(j.last)
-		switch j.state {
-		case jobRunning:
-			icon = m.spinner.View()
-		case jobOK:
-			icon = styleOK.Render("✓")
-		case jobFailed:
-			icon, last = styleErr.Render("✗"), styleErr.Render(j.last)
-		}
-		line := fmt.Sprintf("%s %s  %s %s  %s", icon,
-			styleSource.Render(fit(j.Source, 6)), fit(j.ID, idWidth), fit(j.Latest, 16), last)
-		lines = append(lines, ansi.Truncate(line, width, "…"))
-	}
-
-	body := styleTabOn.Render(title) + "\n\n" +
-		m.progress.ViewAs(float64(done)/float64(len(m.jobs))) + "\n\n" +
-		strings.Join(lines, "\n")
-	inner := m.h - stylePanel.GetVerticalFrameSize()
-	body += strings.Repeat("\n", max(inner-lipgloss.Height(body), 0)) + styleDim.Render(help)
-	return stylePanel.BorderForeground(colorAccent).Width(m.w).Height(m.h).Render(body)
 }

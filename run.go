@@ -26,16 +26,16 @@ type (
 	allDoneMsg struct{}
 )
 
-// runJobs upgrades the packages one after another (package managers do not like running
-// twice at once) and reports every output line; it stops early when ctx is cancelled.
-func runJobs(ctx context.Context, pkgs []pkg, ch chan<- tea.Msg) {
+// runJobs runs the upgrades and uninstalls one after another (package managers do not like
+// running twice at once) and reports every output line; it stops early when ctx is cancelled.
+func runJobs(ctx context.Context, jobs []job, ch chan<- tea.Msg) {
 	defer close(ch)
-	for i, p := range pkgs {
+	for i, j := range jobs {
 		if ctx.Err() != nil {
 			return
 		}
 		ch <- jobStartMsg{i}
-		args := upgradeCommand(p)
+		args := j.command()
 		c := exec.CommandContext(ctx, args[0], args[1:]...)
 		pr, pw := io.Pipe()
 		c.Stdout, c.Stderr = pw, pw

@@ -21,54 +21,100 @@ type pkg struct {
 	Pin                         string // how to unpin it; empty when not pinned
 }
 
-// A source is one package manager: how to find what is outdated there, how to upgrade one of
-// its packages and, when it can, where a package's release date and home page are.
+// A source is one package manager: how to find what is outdated there, how to upgrade or
+// remove one of its packages and, when it can, which versions exist and where a package's
+// release date and home page are.
 type source struct {
 	name     string
 	bin      string
 	hint     string       // how to install it, shown when it is missing
 	check    func() error // extra readiness check after bin is found; may be nil
 	outdated func() ([]pkg, error)
-	upgrade  func(id string) []string
-	info     func(pkg) (details, error) // may be nil
+	upgrade  func(id, version string) []string // version "" means the latest
+	remove   func(p pkg) []string
+	versions func(pkg) ([]release, error) // newest first; nil when only the latest installs
+	info     func(pkg) (details, error)   // may be nil
+}
+
+// at appends "@version" for managers that take `name@version`, or "@latest".
+func at(id, version string) string {
+	if version == "" {
+		version = "latest"
+	}
+	return id + "@" + version
+}
+
+// withVersion appends a --version flag when a version was chosen.
+func withVersion(args []string, version string) []string {
+	if version != "" {
+		args = append(args, "--version", version)
+	}
+	return args
 }
 
 var sources = []source{
 	{name: "winget", bin: "winget", hint: "ships with Windows (App Installer in the Store)",
-		outdated: wingetOutdated, info: wingetInfo,
-		upgrade: func(id string) []string {
-			return []string{"winget", "upgrade", "--id", id, "--exact",
-				"--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"}
+		outdated: wingetOutdated, info: wingetInfo, versions: wingetVersions,
+		upgrade: func(id, v string) []string {
+			return withVersion([]string{"winget", "upgrade", "--id", id, "--exact",
+				"--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"}, v)
+		},
+		remove: func(p pkg) []string {
+			return []string{"winget", "uninstall", "--id", p.ID, "--exact", "--disable-interactivity", "--accept-source-agreements"}
 		}},
 	{name: "scoop", bin: "scoop", hint: "https://scoop.sh",
-		outdated: scoopOutdated, info: scoopInfo,
-		upgrade: func(id string) []string {
+		outdated: scoopOutdated, info: scoopInfo, // its buckets hold only the latest version
+		upgrade: func(id, _ string) []string {
 			return []string{"pwsh", "-NoProfile", "-Command", "scoop", "update", id}
+		},
+		remove: func(p pkg) []string {
+			return []string{"pwsh", "-NoProfile", "-Command", "scoop", "uninstall", p.ID}
 		}},
 	{name: "mise", bin: "mise", hint: "winget install jdx.mise",
-		outdated: miseOutdated,
-		upgrade:  func(id string) []string { return []string{"mise", "upgrade", id} }},
+		outdated: miseOutdated, versions: miseVersions,
+		// A chosen version is written into the global config, like `mise use` does by hand.
+		upgrade: func(id, v string) []string {
+			if v == "" {
+				return []string{"mise", "upgrade", id}
+			}
+			return []string{"mise", "use", "--global", id + "@" + v}
+		},
+		remove: func(p pkg) []string { return []string{"mise", "unuse", "--global", p.ID} }},
 	{name: "npm", bin: "npm", hint: "comes with Node.js (mise use -g node)",
-		outdated: npmOutdated, info: npmInfo,
-		upgrade: func(id string) []string { return []string{"npm", "install", "--global", id + "@latest"} }},
+		outdated: npmOutdated, info: npmInfo, versions: npmVersions,
+		upgrade: func(id, v string) []string { return []string{"npm", "install", "--global", at(id, v)} },
+		remove:  func(p pkg) []string { return []string{"npm", "uninstall", "--global", p.ID} }},
 	{name: "pnpm", bin: "pnpm", hint: "corepack enable pnpm, or npm install -g pnpm",
-		outdated: pnpmOutdated, info: npmInfo,
-		upgrade: func(id string) []string { return []string{"pnpm", "add", "--global", id + "@latest"} }},
+		outdated: pnpmOutdated, info: npmInfo, versions: npmVersions,
+		upgrade: func(id, v string) []string { return []string{"pnpm", "add", "--global", at(id, v)} },
+		remove:  func(p pkg) []string { return []string{"pnpm", "remove", "--global", p.ID} }},
 	{name: "yarn", bin: "yarn", hint: "corepack install -g yarn@1", check: yarnCheck,
-		outdated: yarnOutdated, info: npmInfo,
-		upgrade: func(id string) []string { return []string{"yarn", "global", "add", id + "@latest"} }},
+		outdated: yarnOutdated, info: npmInfo, versions: npmVersions,
+		upgrade: func(id, v string) []string { return []string{"yarn", "global", "add", at(id, v)} },
+		remove:  func(p pkg) []string { return []string{"yarn", "global", "remove", p.ID} }},
 	{name: "bun", bin: "bun", hint: "https://bun.sh (or mise use -g bun)",
-		outdated: bunOutdated, info: npmInfo,
-		upgrade: func(id string) []string { return []string{"bun", "add", "--global", id + "@latest"} }},
+		outdated: bunOutdated, info: npmInfo, versions: npmVersions,
+		upgrade: func(id, v string) []string { return []string{"bun", "add", "--global", at(id, v)} },
+		remove:  func(p pkg) []string { return []string{"bun", "remove", "--global", p.ID} }},
 	{name: "uv", bin: "uv", hint: "mise use -g uv",
-		outdated: uvOutdated, info: pypiInfo,
-		upgrade: func(id string) []string { return []string{"uv", "tool", "upgrade", id} }},
+		outdated: uvOutdated, info: pypiInfo, versions: pypiVersions,
+		upgrade: func(id, v string) []string {
+			if v == "" {
+				return []string{"uv", "tool", "upgrade", id}
+			}
+			return []string{"uv", "tool", "install", "--force", id + "==" + v}
+		},
+		remove: func(p pkg) []string { return []string{"uv", "tool", "uninstall", p.ID} }},
 	{name: "dotnet", bin: "dotnet", hint: "winget install Microsoft.DotNet.SDK.10",
-		outdated: dotnetOutdated, info: nugetInfo,
-		upgrade: func(id string) []string { return []string{"dotnet", "tool", "update", "--global", id} }},
+		outdated: dotnetOutdated, info: nugetInfo, versions: nugetVersions,
+		upgrade: func(id, v string) []string {
+			return withVersion([]string{"dotnet", "tool", "update", "--global", id}, v)
+		},
+		remove: func(p pkg) []string { return []string{"dotnet", "tool", "uninstall", "--global", p.ID} }},
 	{name: "cargo", bin: "cargo", hint: "https://rustup.rs",
-		outdated: cargoOutdated, info: cratesInfo,
-		upgrade: func(id string) []string { return []string{"cargo", "install", id} }},
+		outdated: cargoOutdated, info: cratesInfo, versions: cratesVersions,
+		upgrade: func(id, v string) []string { return withVersion([]string{"cargo", "install", id}, v) },
+		remove:  func(p pkg) []string { return []string{"cargo", "uninstall", p.ID} }},
 }
 
 func sourceNamed(name string) source {
@@ -80,7 +126,7 @@ func sourceNamed(name string) source {
 	return source{}
 }
 
-func upgradeCommand(p pkg) []string { return sourceNamed(p.Source).upgrade(p.ID) }
+func upgradeCommand(p pkg) []string { return sourceNamed(p.Source).upgrade(p.ID, "") }
 
 // missing says why a package manager cannot be asked, or "" when it can.
 func (s source) missing() string {

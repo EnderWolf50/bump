@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestParseWinget(t *testing.T) {
 	out := "   - \r   | \r" +
@@ -74,5 +77,21 @@ func TestParseYarn(t *testing.T) {
 		`{"type":"table","data":{"head":["Package","Current","Wanted","Latest","Package Type","URL"],"body":[["typescript","5.0.0","5.0.0","5.6.2","dependencies","https://x"]]}}`
 	if got := parseYarn(out); len(got) != 1 || got[0].ID != "typescript" || got[0].Latest != "5.6.2" {
 		t.Errorf("parseYarn = %+v", got)
+	}
+}
+
+func TestNewerAndShortcuts(t *testing.T) {
+	rs := newer([]release{{Version: "2.55.0.3"}, {Version: "2.9.0"}, {Version: "3.0.1"}, {Version: "2.55.0.5"},
+		{Version: "2.56.0"}, {Version: "2.55.0.10"}, {Version: "3.0.0"}}, "2.55.0.3")
+	var got []string
+	for _, r := range rs {
+		got = append(got, r.Version)
+	}
+	if want := "[3.0.1 3.0.0 2.56.0 2.55.0.10 2.55.0.5]"; fmt.Sprint(got) != want {
+		t.Fatalf("newer = %v, want %s", got, want)
+	}
+	sc := shortcuts(rs, "2.55.0.3")
+	if sc[bumpMajor].Version != "3.0.1" || sc[bumpMinor].Version != "2.56.0" || sc[bumpPatch].Version != "2.55.0.10" {
+		t.Fatalf("shortcuts = %+v", sc)
 	}
 }
