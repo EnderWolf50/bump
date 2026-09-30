@@ -42,15 +42,17 @@ var (
 	stylePanel = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorFaint).Padding(0, 1)
 
 	// Row backgrounds: the cursor row is a touch lighter, picked rows lean green, rows
-	// picked at a chosen version lean amber, and under the cursor each gets brighter.
+	// picked at a chosen version lean blue, and under the cursor each gets brighter. Blue is
+	// kept out of the major/minor/patch colors so a chosen version never blends into them.
 	bgCursor       = lipgloss.Color("#262626")
 	bgPicked       = lipgloss.Color("#16241f")
 	bgCursorPicked = lipgloss.Color("#223a30")
-	bgChosen       = lipgloss.Color("#3a2c12")
-	bgCursorChosen = lipgloss.Color("#4d3b19")
+	bgChosen       = lipgloss.Color("#18223d")
+	bgCursorChosen = lipgloss.Color("#243258")
 
-	// A version picked below the latest is shown as a badge: dark on the accent color.
-	styleChosen = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#101010")).Background(colorAccent)
+	// A version picked below the latest is shown as a badge: dark on blue.
+	colorChosen = lipgloss.Color("#9fb6ff")
+	styleChosen = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#101010")).Background(colorChosen)
 )
 
 const sideWidth = 30
@@ -319,8 +321,8 @@ func (m *model) redraw() {
 			box = paint(styleOK, "[x]")
 		}
 		if chosen { // picked at a version below the latest
-			box = paint(styleSource, "[v]")
-			to = styleChosen.Render(" "+r.to()+" ") + paint(styleSource, " *")
+			box = paint(lipgloss.NewStyle().Bold(true).Foreground(colorChosen), "[v]")
+			to = styleChosen.Render(" " + r.to() + " ")
 		}
 		row := table.Row{mark + box, paint(styleSource, r.Source), paint(plain, r.ID), paint(plain, r.Current), to, change}
 		for c := range row {
