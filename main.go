@@ -1,12 +1,13 @@
-// bump lists outdated packages from winget, scoop, mise, npm, pnpm, yarn, bun, uv, dotnet,
-// cargo and go (programs from `go install`), lets you pick which to upgrade and to what version, and shows the upgrades'
-// progress.
+// bump lists outdated packages from winget, scoop, brew, mise, npm, pnpm, yarn, bun, uv,
+// dotnet, cargo and go (programs from `go install`), lets you pick which to upgrade and to what
+// version, and shows the upgrades' progress.
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -14,20 +15,21 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-const usage = `bump - upgrade packages from winget, scoop, mise, npm, pnpm, yarn, bun, uv, dotnet,
-cargo (their global packages) and go (programs from 'go install')
+const usage = `bump - upgrade packages from winget and scoop (Windows), brew (macOS, Linux), mise,
+npm, pnpm, yarn, bun, uv, dotnet, cargo (their global packages) and go (programs from
+'go install')
 
   bump                 pick what to upgrade, and to which version (interactive)
   bump -l, --list      only list what is outdated
   bump -y, --yes       upgrade everything that is outdated and not pinned
-  bump <source>...     limit to some sources, e.g. 'bump scoop mise'
+  bump <source>...     limit to some sources, e.g. 'bump npm mise'
 
   bump --version        print the version
   bump --config         show where the settings file is
   bump --default-config print the default settings, a starting point for your own
 
 Pinned packages are listed but never upgraded. Pin with 'winget pin add --id <id>',
-'scoop hold <app>', or a fixed version in mise's config.
+'scoop hold <app>', 'brew pin <formula>', or a fixed version in mise's config.
 
 Settings (theme, managers to skip, packages to ignore, ...) are read from
 ~/.config/bump/config.toml, or the file named by $BUMP_CONFIG.`
@@ -68,7 +70,10 @@ func main() {
 	}
 	applyTheme(cfg.Theme)
 
-	srcs := selected(only)
+	srcs, err := selected(only)
+	if err != nil {
+		fail(err)
+	}
 	if !list && !yes {
 		if _, err := tea.NewProgram(newModel(srcs)).Run(); err != nil {
 			fail(err)
@@ -94,16 +99,27 @@ func main() {
 	upgrade(pkgs)
 }
 
-// selected is the package managers named on the command line, else every one the
-// settings do not skip.
-func selected(only []string) []source {
+// selected is the package managers named on the command line, else every one on this
+// platform the settings do not skip.
+func selected(only []string) ([]source, error) {
+	for _, name := range only {
+		switch s := sourceNamed(name); {
+		case s.name == "":
+			return nil, fmt.Errorf("no package manager called %q", name)
+		case !s.supported():
+			return nil, fmt.Errorf("%s does not run on %s", name, runtime.GOOS)
+		}
+	}
 	var out []source
 	for _, s := range sources {
+		if !s.supported() {
+			continue
+		}
 		if slices.Contains(only, s.name) || (len(only) == 0 && !slices.Contains(cfg.Skip, s.name)) {
 			out = append(out, s)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // missingError is a package manager that cannot be asked at all, as opposed to one that
@@ -122,9 +138,14 @@ func ask(s source) (pkgs []pkg, err error) {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("crashed: %v", r)
 		}
-		// A mise shim for a tool with no version set is on PATH but is not the tool.
-		if err != nil && strings.Contains(err.Error(), "No version is set for shim") {
+		// A mise shim for a tool with no version set is on PATH but is not the tool; nor is
+		// a corepack shim for a manager corepack never downloaded.
+		switch {
+		case err == nil:
+		case strings.Contains(err.Error(), "No version is set for shim"):
 			err = missingError("not installed (only a mise shim, no version set): " + s.hint)
+		case s.corepack != "" && strings.Contains(err.Error(), corepackOffline):
+			err = missingError("not installed (only corepack's shim): corepack install -g " + s.corepack)
 		}
 	}()
 	pkgs, err = s.outdated()
@@ -178,7 +199,7 @@ func upgrade(pkgs []pkg) {
 		}
 		args := upgradeCommand(p)
 		fmt.Printf("\n\x1b[1m> %s\x1b[0m\n", strings.Join(args, " "))
-		c := exec.Command(args[0], args[1:]...)
+		c := command(context.Background(), args)
 		c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 		if err := c.Run(); err != nil {
 			failed = append(failed, strings.Join(args, " "))

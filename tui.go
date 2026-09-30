@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -490,8 +491,7 @@ func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keyOpen):
 		if ok {
 			if in := m.infos[r.key()]; in != nil && in.d.link() != "" {
-				// rundll32 hands the URL to the default browser; `start` would trip over &.
-				exec.Command("rundll32", "url.dll,FileProtocolHandler", in.d.link()).Start()
+				openURL(in.d.link())
 				return m, nil
 			}
 		}
@@ -715,4 +715,17 @@ func (m model) viewList() string {
 		strings.Join(detail, "\n"),
 		ansi.Truncate(m.help.ShortHelpView(keys), width, "…"),
 	}, "\n")
+}
+
+// openURL hands a URL to the default browser.
+func openURL(u string) {
+	switch runtime.GOOS {
+	case "windows":
+		// rundll32 rather than `start`, which would trip over &.
+		exec.Command("rundll32", "url.dll,FileProtocolHandler", u).Start()
+	case "darwin":
+		exec.Command("open", u).Start()
+	default:
+		exec.Command("xdg-open", u).Start()
+	}
 }

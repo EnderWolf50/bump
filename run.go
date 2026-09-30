@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"os/exec"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -36,7 +35,7 @@ func runJobs(ctx context.Context, jobs []job, ch chan<- tea.Msg) {
 		}
 		ch <- jobStartMsg{i}
 		args := j.command()
-		c := exec.CommandContext(ctx, args[0], args[1:]...)
+		c := command(ctx, args)
 		pr, pw := io.Pipe()
 		c.Stdout, c.Stderr = pw, pw
 		if err := c.Start(); err != nil {
