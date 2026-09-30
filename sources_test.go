@@ -98,3 +98,36 @@ func TestNewerAndShortcuts(t *testing.T) {
 		t.Fatalf("shortcuts = %+v", sc)
 	}
 }
+
+func TestParseGoVersion(t *testing.T) {
+	out := "C:\\bin\\bump.exe: go1.27.1\r\n" +
+		"\tpath\tgithub.com/EnderWolf50/bump\r\n" +
+		"\tmod\tgithub.com/EnderWolf50/bump\tv0.0.0-20260930192911-377517dfe715+dirty\t\r\n" +
+		"C:\\bin\\gopls.exe: go1.27.1\r\n" +
+		"\tpath\tgolang.org/x/tools/gopls\r\n" +
+		"\tmod\tgolang.org/x/tools/gopls\tv0.20.0\th1:abc=\r\n" +
+		"\tdep\tgolang.org/x/mod\tv0.25.0\th1:def=\r\n" +
+		"C:\\bin\\tool.exe: go1.27.1\r\n" +
+		"\tpath\tcommand-line-arguments\r\n"
+	bins := parseGoVersion(out)
+	if len(bins) != 3 {
+		t.Fatalf("%d binaries: %+v", len(bins), bins)
+	}
+	if b := bins[1]; b.file != `C:\bin\gopls.exe` || b.path != "golang.org/x/tools/gopls" || b.module != "golang.org/x/tools/gopls" || b.version != "v0.20.0" || b.fromSource() {
+		t.Errorf("gopls: %+v", b)
+	}
+	if !bins[0].fromSource() || !bins[2].fromSource() {
+		t.Error("a dirty or module-less build counts as installed from a release")
+	}
+}
+
+func TestGoProxyAndInstall(t *testing.T) {
+	if got := goProxy("github.com/EnderWolf50/bump", "@latest"); got != "https://proxy.golang.org/github.com/!ender!wolf50/bump/@latest" {
+		t.Errorf("goProxy = %s", got)
+	}
+	p := pkg{Source: "go", ID: "golang.org/x/tools/gopls", Dir: `C:\Users\o'neil\.local\bin`}
+	want := `$env:GOBIN = 'C:\Users\o''neil\.local\bin'; go install golang.org/x/tools/gopls@v0.21.0`
+	if got := goInstall(p, "v0.21.0"); got[len(got)-1] != want {
+		t.Errorf("goInstall = %q", got[len(got)-1])
+	}
+}

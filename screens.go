@@ -285,7 +285,7 @@ func (j job) to() string {
 	return j.Latest
 }
 
-func (j job) command() []string { return sourceNamed(j.Source).upgrade(j.ID, j.target) }
+func (j job) command() []string { return sourceNamed(j.Source).upgrade(j.pkg, j.target) }
 
 // start runs what the review listed and switches to the progress screen.
 func (m model) start() (tea.Model, tea.Cmd) {

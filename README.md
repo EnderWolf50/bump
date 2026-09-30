@@ -3,7 +3,7 @@
 Upgrade the packages of every package manager on a Windows machine from one screen: see
 what is outdated, pick what to upgrade and to which version, review, and watch it run.
 
-bump asks winget, scoop, mise, npm, pnpm, yarn, bun, uv, dotnet and cargo at once. Each
+bump asks winget, scoop, mise, npm, pnpm, yarn, bun, uv, dotnet, cargo and go at once. Each
 answers when it can; a manager that is missing or fails is shown as such rather than
 holding the others up.
 
@@ -38,6 +38,12 @@ table the outdated packages of the one selected:
 | `r` | check the selected manager again |
 | `s` | save: review the upgrades, then run them |
 | `←` `h` `esc` `q` | back to the sidebar |
+
+The go manager covers programs installed with `go install`: bump reads which module and
+version each binary in GOBIN, GOPATH\bin and ~/.local/bin was built from, asks the Go
+module proxy for newer versions, and installs the new one into the same folder. Binaries
+built from a checkout (`go build`) have no released version to compare, so they are left
+out. A release can take a few minutes to show, while the proxy's cache catches up.
 
 Pinned packages (winget pins, scoop holds, versions fixed in mise's config) are listed but
 never upgraded; bump shows how to unpin them. Scoop can only install the latest version.

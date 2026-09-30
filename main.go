@@ -1,5 +1,5 @@
-// bump lists outdated packages from winget, scoop, mise, npm, pnpm, yarn, bun, uv, dotnet
-// and cargo, lets you pick which to upgrade and to what version, and shows the upgrades'
+// bump lists outdated packages from winget, scoop, mise, npm, pnpm, yarn, bun, uv, dotnet,
+// cargo and go (programs from `go install`), lets you pick which to upgrade and to what version, and shows the upgrades'
 // progress.
 package main
 
@@ -14,8 +14,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-const usage = `bump - upgrade packages from winget, scoop, mise, npm, pnpm, yarn, bun, uv, dotnet
-and cargo (their global packages)
+const usage = `bump - upgrade packages from winget, scoop, mise, npm, pnpm, yarn, bun, uv, dotnet,
+cargo (their global packages) and go (programs from 'go install')
 
   bump                 pick what to upgrade, and to which version (interactive)
   bump -l, --list      only list what is outdated
