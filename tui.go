@@ -42,7 +42,7 @@ var (
 	styleModal = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBad).Padding(1, 3)
 )
 
-const sideWidth = 24
+const sideWidth = 30
 
 // Lines of the right panel around the table: heading and filter above; a blank, the
 // divider, three detail lines and the help below.
@@ -126,7 +126,7 @@ var (
 	keyOpen   = key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open page"))
 	keySave   = key.NewBinding(key.WithKeys("enter", "s"), key.WithHelp("enter/s", "save"))
 	keyBack   = key.NewBinding(key.WithKeys("left", "h", "esc", "q"), key.WithHelp("←/h/esc/q", "back"))
-	keyCheck  = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "check again"))
+	keyCheck  = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh"))
 )
 
 type model struct {
@@ -597,9 +597,9 @@ func (m model) viewPick() string {
 		case t.loading:
 			count = m.spinner.View()
 		case t.missing():
-			count = "n/a"
+			count = "?"
 		case t.err != nil:
-			count = styleErr.Render("error")
+			count = styleErr.Render("!")
 		default:
 			n := 0
 			for _, r := range m.rows {
@@ -612,7 +612,7 @@ func (m model) viewPick() string {
 				count = fmt.Sprintf("%d/%d", p, n)
 			}
 		}
-		label := fmt.Sprintf("%-8s %s", t.name, lipgloss.PlaceHorizontal(9, lipgloss.Right, count))
+		label := fmt.Sprintf("%-10s %s", t.name, lipgloss.PlaceHorizontal(13, lipgloss.Right, count))
 		switch {
 		case i == m.on:
 			side = append(side, styleTabOn.Render("▌ "+label))
@@ -631,7 +631,7 @@ func (m model) viewPick() string {
 	// bottom. (The filler string adds one line more than its newlines.)
 	foot := []string{"checked " + m.lastChecked().Format("15:04")}
 	if !m.inList {
-		foot = append(foot, "", "↑/k      up", "↓/j      down", "→/enter  open", "r        check again", "s        save", "esc/q    quit")
+		foot = append(foot, "", "↑/k      up", "↓/j      down", "→/enter  open", "r        refresh", "s        save", "esc/q    quit")
 	}
 	inner := m.h - sideStyle.GetVerticalFrameSize()
 	side = append(side, strings.Repeat("\n", max(inner-len(side)-len(foot)-1, 0)))
@@ -682,16 +682,15 @@ func (m model) viewList() string {
 		case !in.d.Released.IsZero():
 			released = "released " + in.d.Released.Local().Format("2006-01-02") + " · " + ago(in.d.Released, time.Now())
 		}
+		if link := in.d.link(); link != "" {
+			detail[0] = styleDim.Render("o  ") + link
+		}
 		name := styleSource.Render(r.ID) + styleDim.Render("  "+r.Source)
 		gap := max(width-lipgloss.Width(name)-lipgloss.Width(released), 2)
-		detail[0] = name + strings.Repeat(" ", gap) + styleDim.Render(released)
-		detail[1] = r.Current + styleDim.Render("  →  ") + styleBump[level].Render(r.Latest+"  "+bumpName[level])
-		if link := in.d.link(); link != "" {
-			detail[2] = styleDim.Render("o  ") + link
-		}
+		detail[1] = name + strings.Repeat(" ", gap) + styleDim.Render(released)
+		detail[2] = r.Current + styleDim.Render("  →  ") + styleBump[level].Render(r.Latest+"  "+bumpName[level])
 		if r.Pin != "" {
-			detail[1] = r.Current + styleDim.Render("  →  "+r.Latest+"  pinned")
-			detail[2] = styleDim.Render("unpin with  " + r.Pin)
+			detail[2] = r.Current + styleDim.Render("  →  "+r.Latest+"  pinned · unpin with  "+r.Pin)
 		}
 	}
 	for i := range detail {
@@ -713,7 +712,7 @@ func (m model) viewList() string {
 		note = []string{t.name + " cannot be checked", styleDim.Render(t.err.Error())}
 	case t.err != nil:
 		note = []string{styleErr.Render(t.name + " could not be checked"), styleDim.Render(t.err.Error()),
-			"", styleDim.Render("r checks again")}
+			"", styleDim.Render("r refreshes")}
 	case len(m.shown) == 0 && m.filter.Value() != "":
 		note = []string{styleDim.Render("nothing matches the filter"), styleDim.Render("esc clears it")}
 	case len(m.shown) == 0 && !m.busy():
