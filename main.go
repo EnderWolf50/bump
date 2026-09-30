@@ -1,5 +1,6 @@
-// up lists outdated packages from winget, scoop, mise and global npm, lets you pick which to
-// upgrade and shows the upgrades' progress.
+// bump lists outdated packages from winget, scoop, mise, npm, pnpm, yarn, bun, uv, dotnet
+// and cargo, lets you pick which to upgrade and to what version, and shows the upgrades'
+// progress.
 package main
 
 import (
@@ -13,12 +14,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-const usage = `up - upgrade packages from winget, scoop, mise and npm (global)
+const usage = `bump - upgrade packages from winget, scoop, mise, npm, pnpm, yarn, bun, uv, dotnet
+and cargo (their global packages)
 
-  up                 pick what to upgrade (interactive)
-  up -l, --list      only list what is outdated
-  up -y, --yes       upgrade everything that is outdated and not pinned
-  up <source>...     limit to some sources, e.g. 'up scoop mise'
+  bump                 pick what to upgrade, and to which version (interactive)
+  bump -l, --list      only list what is outdated
+  bump -y, --yes       upgrade everything that is outdated and not pinned
+  bump <source>...     limit to some sources, e.g. 'bump scoop mise'
 
 Pinned packages are listed but never upgraded. Pin with 'winget pin add --id <id>',
 'scoop hold <app>', or a fixed version in mise's config.`
@@ -102,7 +104,7 @@ func ask(s source) (pkgs []pkg, err error) {
 }
 
 func fail(err error) {
-	fmt.Fprintln(os.Stderr, "up:", err)
+	fmt.Fprintln(os.Stderr, "bump:", err)
 	os.Exit(1)
 }
 

@@ -1,4 +1,4 @@
-module github.com/EnderWolf50/up
+module github.com/EnderWolf50/bump
 
 go 1.27.1
 

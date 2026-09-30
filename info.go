@@ -34,7 +34,7 @@ func getJSON(u string, v any) error {
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "up (github.com/EnderWolf50/up)") // crates.io requires one
+	req.Header.Set("User-Agent", "bump (github.com/EnderWolf50/bump)") // crates.io requires one
 	res, err := httpClient.Do(req)
 	if err != nil {
 		return err
