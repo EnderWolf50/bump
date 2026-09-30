@@ -15,11 +15,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-var (
-	styleModal  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBad).Padding(1, 3)
-	stylePicker = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Padding(0, 1)
-)
-
 // ---- the version picker -------------------------------------------------------------------
 
 // versionsMsg brings the versions a package could go to.

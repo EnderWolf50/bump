@@ -22,8 +22,14 @@ and cargo (their global packages)
   bump -y, --yes       upgrade everything that is outdated and not pinned
   bump <source>...     limit to some sources, e.g. 'bump scoop mise'
 
+  bump --config         show where the settings file is
+  bump --default-config print the default settings, a starting point for your own
+
 Pinned packages are listed but never upgraded. Pin with 'winget pin add --id <id>',
-'scoop hold <app>', or a fixed version in mise's config.`
+'scoop hold <app>', or a fixed version in mise's config.
+
+Settings (theme, managers to skip, packages to ignore, ...) are read from
+~/.config/bump/config.toml, or the file named by $BUMP_CONFIG.`
 
 func main() {
 	list, yes := false, false
@@ -37,10 +43,26 @@ func main() {
 		case "-h", "--help":
 			fmt.Println(usage)
 			return
+		case "--default-config":
+			fmt.Print(defaultConfig)
+			return
+		case "--config":
+			path := configPath()
+			if _, err := os.Stat(path); err != nil {
+				path += "  (not there yet: bump --default-config > it, then edit)"
+			}
+			fmt.Println(path)
+			return
 		default:
 			only = append(only, a)
 		}
 	}
+
+	var err error
+	if cfg, err = loadConfig(configPath()); err != nil {
+		fail(err)
+	}
+	applyTheme(cfg.Theme)
 
 	srcs := selected(only)
 	if !list && !yes {
@@ -68,11 +90,12 @@ func main() {
 	upgrade(pkgs)
 }
 
-// selected is every package manager, or only those named on the command line.
+// selected is the package managers named on the command line, else every one the
+// settings do not skip.
 func selected(only []string) []source {
 	var out []source
 	for _, s := range sources {
-		if len(only) == 0 || slices.Contains(only, s.name) {
+		if slices.Contains(only, s.name) || (len(only) == 0 && !slices.Contains(cfg.Skip, s.name)) {
 			out = append(out, s)
 		}
 	}
@@ -100,7 +123,8 @@ func ask(s source) (pkgs []pkg, err error) {
 			err = missingError("not installed (only a mise shim, no version set): " + s.hint)
 		}
 	}()
-	return s.outdated()
+	pkgs, err = s.outdated()
+	return slices.DeleteFunc(pkgs, func(p pkg) bool { return !cfg.keep(p) }), err
 }
 
 func fail(err error) {

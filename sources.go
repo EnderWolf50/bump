@@ -126,9 +126,6 @@ func (s source) missing() string {
 	return ""
 }
 
-// checkTimeout stops a package manager that hangs, say on a prompt nobody can answer.
-const checkTimeout = 3 * time.Minute
-
 func output(name string, args ...string) ([]byte, error) {
 	return outputOf(exec.Command(name, args...))
 }
@@ -140,10 +137,12 @@ func outputOf(c *exec.Cmd) ([]byte, error) {
 	if err := c.Start(); err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
-	timer := time.AfterFunc(checkTimeout, func() { c.Process.Kill() })
+	// The timeout stops a package manager that hangs, say on a prompt nobody can answer.
+	timeout := cfg.Timeout.Duration
+	timer := time.AfterFunc(timeout, func() { c.Process.Kill() })
 	err := c.Wait()
 	if !timer.Stop() {
-		return nil, fmt.Errorf("%s gave no answer in %s", name, checkTimeout)
+		return nil, fmt.Errorf("%s gave no answer in %s", name, timeout)
 	}
 	if err != nil && stdout.Len() == 0 {
 		msg := strings.TrimSpace(stderr.String())

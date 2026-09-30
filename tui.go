@@ -20,38 +20,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-var (
-	colorAccent = lipgloss.Color("#ffc799")
-	colorFaint  = lipgloss.Color("#505050")
-	colorOK     = lipgloss.Color("#99ffe4")
-	colorBad    = lipgloss.Color("#ff8080")
-
-	styleSource = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
-	// A version is colored by how far it jumps; see bump.
-	styleBump = map[int]lipgloss.Style{
-		bumpMajor: lipgloss.NewStyle().Foreground(colorBad),
-		bumpMinor: lipgloss.NewStyle().Foreground(colorAccent),
-		bumpPatch: lipgloss.NewStyle().Foreground(colorOK),
-		bumpOther: lipgloss.NewStyle().Foreground(lipgloss.Color("#a0a0a0")),
-	}
-	styleOK    = lipgloss.NewStyle().Foreground(colorOK)
-	styleErr   = lipgloss.NewStyle().Foreground(colorBad)
-	styleDim   = lipgloss.NewStyle().Foreground(lipgloss.Color("#8b8b8b"))
-	styleFaint = lipgloss.NewStyle().Foreground(colorFaint)
-	styleTabOn = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
-	stylePanel = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorFaint).Padding(0, 1)
-
-	// Row backgrounds: the cursor row is a touch lighter, picked rows lean green, rows
-	// picked at a chosen version lean amber, and under the cursor each gets brighter. The
-	// tint marks a chosen version whatever color its change level gives the text.
-	bgCursor       = lipgloss.Color("#262626")
-	bgPicked       = lipgloss.Color("#16241f")
-	bgCursorPicked = lipgloss.Color("#223a30")
-	bgChosen       = lipgloss.Color("#3a2c12")
-	bgCursorChosen = lipgloss.Color("#4d3b19")
-)
-
-const sideWidth = 30
+// sideWidth is the sidebar's width, from the settings.
+func sideWidth() int { return cfg.SidebarWidth }
 
 // Lines of the right panel around the table: heading and filter above; a blank, the
 // divider, two detail lines and the help below.
@@ -200,7 +170,7 @@ func newModel(srcs []source) model {
 	km.HalfPageUp = key.NewBinding(key.WithKeys("ctrl+u"))
 	km.HalfPageDown = key.NewBinding(key.WithKeys("ctrl+d"))
 	styles := table.DefaultStyles()
-	styles.Header = styles.Header.Padding(0).Foreground(lipgloss.Color("#8b8b8b")).BorderForeground(colorFaint)
+	styles.Header = styles.Header.Padding(0).Foreground(colorDim).BorderForeground(colorFaint)
 	styles.Cell = lipgloss.NewStyle()     // redraw pads and paints every cell itself
 	styles.Selected = lipgloss.NewStyle() // the cursor row is painted by redraw too
 	m.table = table.New(table.WithColumns(columns(80)), table.WithKeyMap(km), table.WithStyles(styles), table.WithFocused(true))
@@ -362,7 +332,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		frameW, frameH := stylePanel.GetFrameSize()
-		width := m.w - sideWidth - frameW
+		width := m.w - sideWidth() - frameW
 		m.table.SetColumns(columns(width))
 		m.table.SetWidth(width)
 		m.table.SetHeight(m.h - frameH - tableChrome)
@@ -644,8 +614,8 @@ func (m model) viewPick() string {
 	side = append(side, strings.Repeat("\n", max(inner-len(side)-len(foot)-1, 0)))
 	side = append(side, styleDim.Render(strings.Join(foot, "\n")))
 	return lipgloss.JoinHorizontal(lipgloss.Top,
-		sideStyle.Width(sideWidth).Height(m.h).Render(strings.Join(side, "\n")),
-		listStyle.Width(m.w-sideWidth).Height(m.h).Render(m.viewList()))
+		sideStyle.Width(sideWidth()).Height(m.h).Render(strings.Join(side, "\n")),
+		listStyle.Width(m.w-sideWidth()).Height(m.h).Render(m.viewList()))
 }
 
 // viewList is the right panel: heading, filter, the table, what is known about the package
@@ -653,7 +623,7 @@ func (m model) viewPick() string {
 func (m model) viewList() string {
 	t := m.tabs[m.on]
 	// Never below zero, even in a terminal narrower than the sidebar.
-	width := max(m.w-sideWidth-stylePanel.GetHorizontalFrameSize(), 0)
+	width := max(m.w-sideWidth()-stylePanel.GetHorizontalFrameSize(), 0)
 	heading := styleTabOn.Render(t.name)
 	switch {
 	case t.loading:
