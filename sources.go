@@ -531,17 +531,24 @@ var versionNumber = regexp.MustCompile(`\d+`)
 // "1.4.2" -> "1.5.0" is minor. Text around them ("< ", "-nightly", "b") is ignored.
 func bump(cur, latest string) int {
 	a, b := versionNumber.FindAllString(cur, -1), versionNumber.FindAllString(latest, -1)
-	for i := 0; i < len(a) && i < len(b); i++ {
-		x, _ := strconv.Atoi(a[i])
-		y, _ := strconv.Atoi(b[i])
-		if x != y {
-			return min(i+1, bumpPatch)
-		}
-	}
 	if len(a) == 0 || len(b) == 0 {
 		return bumpOther
 	}
+	for i := range max(len(a), len(b)) {
+		if part(a, i) != part(b, i) {
+			return min(i+1, bumpPatch)
+		}
+	}
 	return bumpPatch // same numbers, different suffix: 1.2.3b -> 1.2.3c
+}
+
+// part is the i-th number of a version, 0 past its end: "1" reads as 1.0.0.
+func part(nums []string, i int) int {
+	if i >= len(nums) {
+		return 0
+	}
+	n, _ := strconv.Atoi(nums[i])
+	return n
 }
 
 // fit pads s to n cells, or cuts it with "…" when longer.

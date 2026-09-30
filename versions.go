@@ -4,7 +4,6 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -18,15 +17,10 @@ type release struct {
 // compareVersions orders versions by their numbers ("1.10" after "1.9"), then as text.
 func compareVersions(a, b string) int {
 	x, y := versionNumber.FindAllString(a, -1), versionNumber.FindAllString(b, -1)
-	for i := 0; i < len(x) && i < len(y); i++ {
-		p, _ := strconv.Atoi(x[i])
-		q, _ := strconv.Atoi(y[i])
-		if p != q {
+	for i := range max(len(x), len(y)) {
+		if p, q := part(x, i), part(y, i); p != q {
 			return p - q
 		}
-	}
-	if len(x) != len(y) {
-		return len(x) - len(y)
 	}
 	return strings.Compare(a, b)
 }

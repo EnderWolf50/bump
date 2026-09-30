@@ -96,7 +96,15 @@ func TestModel(t *testing.T) {
 	if quits(cmd) || !m.confirmQuit {
 		t.Fatal("q with a package chosen did not ask first")
 	}
-	m, _ = press(m, "esc") // stay
+	for _, k := range []string{"j", "s", "enter", "space"} { // only the question's keys count
+		if m, _ = press(m, k); !m.confirmQuit || m.reviewing {
+			t.Fatalf("%q acted behind the quit dialog", k)
+		}
+	}
+	m, _ = press(m, "n") // stay
+	if m.confirmQuit {
+		t.Fatal("n did not close the quit dialog")
+	}
 	m, _ = press(m, "enter")
 	m, _ = press(m, "h")
 	if m.inList || m.confirmQuit {

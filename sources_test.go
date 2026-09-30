@@ -39,6 +39,9 @@ func TestBump(t *testing.T) {
 		{"0.0.43-nightly.20260925.2251", "0.0.44", bumpPatch},
 		{"1.21.14b", "1.22.3b", bumpMinor},
 		{"Unknown", "1.0", bumpOther},
+		{"1", "1.5.0", bumpMinor},
+		{"26", "27.0.1", bumpMajor},
+		{"2.0", "2.0.0.1", bumpPatch},
 	} {
 		if got := bump(c.cur, c.latest); got != c.want {
 			t.Errorf("bump(%q, %q) = %d, want %d", c.cur, c.latest, got, c.want)

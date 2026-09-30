@@ -177,17 +177,17 @@ func (m model) quitDialog() string {
 		"",
 		fmt.Sprintf("%d picked package%s will not be upgraded.", n, map[bool]string{true: "", false: "s"}[n == 1]),
 		"",
-		styleDim.Render("q/y quit · s review and save · esc stay")))
+		styleDim.Render("y/q quit · n/esc stay")))
 }
 
-// The quit dialog: quit, save instead, or anything else to stay.
+// The quit dialog only answers the question: y/q quit, n/esc stay. Every other key is
+// ignored while it is open.
 func (m model) updateQuit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	m.confirmQuit = false
 	switch msg.String() {
-	case "q", "y":
+	case "y", "q":
 		return m, tea.Quit
-	case "s", "enter":
-		return m.startReview()
+	case "n", "esc":
+		m.confirmQuit = false
 	}
 	return m, nil
 }

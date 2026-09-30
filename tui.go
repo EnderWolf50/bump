@@ -41,11 +41,13 @@ var (
 	styleTabOn = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
 	stylePanel = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorFaint).Padding(0, 1)
 
-	// Row backgrounds: the cursor row is a touch lighter, picked rows lean green, and a
-	// picked row under the cursor gets both.
+	// Row backgrounds: the cursor row is a touch lighter, picked rows lean green, rows
+	// picked at a chosen version lean amber, and under the cursor each gets brighter.
 	bgCursor       = lipgloss.Color("#262626")
 	bgPicked       = lipgloss.Color("#16241f")
 	bgCursorPicked = lipgloss.Color("#223a30")
+	bgChosen       = lipgloss.Color("#2b2215")
+	bgCursorChosen = lipgloss.Color("#40321d")
 )
 
 const sideWidth = 30
@@ -279,8 +281,13 @@ func (m *model) redraw() {
 		onCursor := i == cursor && m.inList
 		// A background only holds up to the next reset, so every piece of the row is painted
 		// with it: each colored run and each cell's padding.
+		chosen := r.picked && r.target != ""
 		var bg lipgloss.Style
 		switch {
+		case onCursor && chosen:
+			bg = bg.Background(bgCursorChosen)
+		case chosen:
+			bg = bg.Background(bgChosen)
 		case onCursor && r.picked:
 			bg = bg.Background(bgCursorPicked)
 		case onCursor:
@@ -308,8 +315,9 @@ func (m *model) redraw() {
 		case r.picked:
 			box = paint(styleOK, "[x]")
 		}
-		if r.target != "" && r.picked {
-			to += paint(styleDim, " *") // chosen, not the latest
+		if chosen {
+			box = paint(styleSource, "[v]") // picked at a chosen version, not the latest
+			to += paint(styleSource, " *")
 		}
 		row := table.Row{mark + box, paint(styleSource, r.Source), paint(plain, r.ID), paint(plain, r.Current), to, change}
 		for c := range row {
