@@ -179,9 +179,9 @@ func TestVersionPicker(t *testing.T) {
 	if got := strings.Join(jobFor(m.rows[0]).command(), " "); !strings.Contains(got, "--version 1.5.0") {
 		t.Fatalf("command %q does not ask for 1.5.0", got)
 	}
-	// A version below the latest shows as a badge on the accent color.
-	if to := m.table.Rows()[0][4]; !strings.Contains(to, "48;2;159;182;255") || !strings.Contains(ansi.Strip(to), "1.5.0") {
-		t.Fatalf("the chosen version is not a badge: %q", to)
+	// A row picked at a version below the latest gets the amber tint (brighter: the cursor is on it).
+	if to := m.table.Rows()[0][4]; !strings.Contains(to, "48;2;77;59;25") || !strings.Contains(ansi.Strip(to), "1.5.0") {
+		t.Fatalf("the chosen version is not tinted: %q", to)
 	}
 	// Unpicking drops the chosen version; picking again means the latest.
 	m, _ = press(m, "space")
