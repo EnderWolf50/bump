@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,20 +25,23 @@ type pkg struct {
 
 	// For go only: the module the program comes from, and the folder it is installed in.
 	Module, Dir string
+
+	Cask bool // for brew only: a cask, not a formula
 }
 
 // A source is one package manager: how to find what is outdated there, how to upgrade one of
 // its packages and, when it can, which versions exist and where a package's release date and
 // home page are.
 type source struct {
-	name     string
-	bin      string
-	hint     string       // how to install it, shown when it is missing
-	check    func() error // extra readiness check after bin is found; may be nil
-	outdated func() ([]pkg, error)
-	upgrade  func(p pkg, version string) []string // version "" means the latest
-	versions func(pkg) ([]release, error)         // newest first; nil when only the latest installs
-	info     func(pkg) (details, error)           // may be nil
+	name      string
+	bin       string
+	platforms []string // the GOOS values it exists on; nil means every one
+	hint      string   // how to install it, shown when it is missing
+	corepack  string   // what `corepack install -g` takes, for managers corepack can shim
+	outdated  func() ([]pkg, error)
+	upgrade   func(p pkg, version string) []string // version "" means the latest
+	versions  func(pkg) ([]release, error)         // newest first; nil when only the latest installs
+	info      func(pkg) (details, error)           // may be nil
 }
 
 // at appends "@version" for managers that take `name@version`, or "@latest".
@@ -44,6 +50,14 @@ func at(id, version string) string {
 		version = "latest"
 	}
 	return id + "@" + version
+}
+
+// byOS picks the entry for this platform, else the one under "".
+func byOS(m map[string]string) string {
+	if v, ok := m[runtime.GOOS]; ok {
+		return v
+	}
+	return m[""]
 }
 
 // withVersion appends a --version flag when a version was chosen.
@@ -55,18 +69,27 @@ func withVersion(args []string, version string) []string {
 }
 
 var sources = []source{
-	{name: "winget", bin: "winget", hint: "ships with Windows (App Installer in the Store)",
+	{name: "winget", bin: "winget", platforms: []string{"windows"}, hint: "ships with Windows (App Installer in the Store)",
 		outdated: wingetOutdated, info: wingetInfo, versions: wingetVersions,
 		upgrade: func(p pkg, v string) []string {
 			return withVersion([]string{"winget", "upgrade", "--id", p.ID, "--exact",
 				"--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"}, v)
 		}},
-	{name: "scoop", bin: "scoop", hint: "https://scoop.sh",
+	{name: "scoop", bin: "scoop", platforms: []string{"windows"}, hint: "https://scoop.sh",
 		outdated: scoopOutdated, info: scoopInfo, // its buckets hold only the latest version
 		upgrade: func(p pkg, _ string) []string {
 			return []string{"pwsh", "-NoProfile", "-Command", "scoop", "update", p.ID}
 		}},
-	{name: "mise", bin: "mise", hint: "winget install jdx.mise",
+	{name: "brew", bin: "brew", platforms: []string{"darwin", "linux"}, hint: "https://brew.sh",
+		outdated: brewOutdated, info: brewInfo, // like scoop, it installs only the latest version
+		upgrade: func(p pkg, _ string) []string {
+			if p.Cask {
+				return []string{"brew", "upgrade", "--cask", p.ID}
+			}
+			return []string{"brew", "upgrade", p.ID}
+		}},
+	{name: "mise", bin: "mise",
+		hint:     byOS(map[string]string{"windows": "winget install jdx.mise", "darwin": "brew install mise", "": "https://mise.jdx.dev"}),
 		outdated: miseOutdated, versions: miseVersions,
 		// A chosen version is written into the global config, like `mise use` does by hand.
 		upgrade: func(p pkg, v string) []string {
@@ -78,10 +101,10 @@ var sources = []source{
 	{name: "npm", bin: "npm", hint: "comes with Node.js (mise use -g node)",
 		outdated: npmOutdated, info: npmInfo, versions: npmVersions,
 		upgrade: func(p pkg, v string) []string { return []string{"npm", "install", "--global", at(p.ID, v)} }},
-	{name: "pnpm", bin: "pnpm", hint: "corepack enable pnpm, or npm install -g pnpm",
+	{name: "pnpm", bin: "pnpm", hint: "npm install -g pnpm, or corepack enable pnpm", corepack: "pnpm",
 		outdated: pnpmOutdated, info: npmInfo, versions: npmVersions,
 		upgrade: func(p pkg, v string) []string { return []string{"pnpm", "add", "--global", at(p.ID, v)} }},
-	{name: "yarn", bin: "yarn", hint: "corepack install -g yarn@1", check: yarnCheck,
+	{name: "yarn", bin: "yarn", hint: "npm install -g yarn, or corepack install -g yarn@1", corepack: "yarn@1",
 		outdated: yarnOutdated, info: npmInfo, versions: npmVersions,
 		upgrade: func(p pkg, v string) []string { return []string{"yarn", "global", "add", at(p.ID, v)} }},
 	{name: "bun", bin: "bun", hint: "https://bun.sh (or mise use -g bun)",
@@ -95,7 +118,8 @@ var sources = []source{
 			}
 			return []string{"uv", "tool", "install", "--force", p.ID + "==" + v}
 		}},
-	{name: "dotnet", bin: "dotnet", hint: "winget install Microsoft.DotNet.SDK.10",
+	{name: "dotnet", bin: "dotnet", hint: byOS(map[string]string{"windows": "winget install Microsoft.DotNet.SDK.10",
+		"darwin": "brew install --cask dotnet-sdk", "": "https://dot.net"}),
 		outdated: dotnetOutdated, info: nugetInfo, versions: nugetVersions,
 		upgrade: func(p pkg, v string) []string {
 			return withVersion([]string{"dotnet", "tool", "update", "--global", p.ID}, v)
@@ -118,26 +142,50 @@ func sourceNamed(name string) source {
 
 func upgradeCommand(p pkg) []string { return sourceNamed(p.Source).upgrade(p, "") }
 
+// supported says the package manager exists on this platform at all; the others are not
+// shown, rather than shown as not installed.
+func (s source) supported() bool {
+	return s.platforms == nil || slices.Contains(s.platforms, runtime.GOOS)
+}
+
 // missing says why a package manager cannot be asked, or "" when it can.
 func (s source) missing() string {
 	if _, err := exec.LookPath(s.bin); err != nil {
 		return "not installed: " + s.hint
 	}
-	if s.check != nil {
-		if err := s.check(); err != nil {
-			return err.Error()
-		}
-	}
 	return ""
+}
+
+// command turns an upgrade command into a process; leading NAME=value words set variables
+// for it, as a shell would, so a command reads the same on every platform.
+func command(ctx context.Context, args []string) *exec.Cmd {
+	var env []string
+	for len(args) > 1 && strings.Contains(args[0], "=") {
+		env, args = append(env, args[0]), args[1:]
+	}
+	c := exec.CommandContext(ctx, args[0], args[1:]...)
+	if env != nil {
+		c.Env = append(os.Environ(), env...)
+	}
+	return c
 }
 
 func output(name string, args ...string) ([]byte, error) {
 	return outputOf(exec.Command(name, args...))
 }
 
+// corepackOffline is how corepack's shim answers when the manager behind it was never
+// downloaded, rather than stopping at its download prompt. Whatever installed the manager,
+// asking the shim is the one reliable test.
+const corepackOffline = "Network access disabled by the environment"
+
 func outputOf(c *exec.Cmd) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	name := filepath.Base(c.Path)
+	if c.Env == nil {
+		c.Env = os.Environ()
+	}
+	c.Env = append(c.Env, "COREPACK_ENABLE_NETWORK=0")
 	c.Stdout, c.Stderr = &stdout, &stderr
 	if err := c.Start(); err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
@@ -270,6 +318,54 @@ func scoopOutdated() ([]pkg, error) {
 	return pkgs, nil
 }
 
+func brewOutdated() ([]pkg, error) {
+	// `brew update` first: outdated compares against the taps as they are on disk.
+	output("brew", "update", "--quiet")
+	out, err := output("brew", "outdated", "--json=v2")
+	if err != nil {
+		return nil, err
+	}
+	return parseBrew(out)
+}
+
+// parseBrew reads `brew outdated --json=v2`. A cask's installed_versions has been a string
+// in some releases and a list in others.
+func parseBrew(out []byte) ([]pkg, error) {
+	type entry struct {
+		Name              string
+		InstalledVersions json.RawMessage `json:"installed_versions"`
+		CurrentVersion    string          `json:"current_version"`
+		Pinned            bool
+	}
+	var doc struct{ Formulae, Casks []entry }
+	if err := json.Unmarshal(out, &doc); err != nil {
+		return nil, fmt.Errorf("brew outdated: %w", err)
+	}
+	installed := func(raw json.RawMessage) string {
+		var list []string
+		if json.Unmarshal(raw, &list) == nil && len(list) > 0 {
+			return list[len(list)-1]
+		}
+		var one string
+		json.Unmarshal(raw, &one)
+		return one
+	}
+	var pkgs []pkg
+	for _, f := range doc.Formulae {
+		p := pkg{Source: "brew", ID: f.Name, Current: installed(f.InstalledVersions), Latest: f.CurrentVersion}
+		if f.Pinned {
+			p.Pin = "brew unpin " + f.Name
+		}
+		pkgs = append(pkgs, p)
+	}
+	for _, c := range doc.Casks {
+		pkgs = append(pkgs, pkg{Source: "brew", ID: c.Name, Current: installed(c.InstalledVersions),
+			Latest: c.CurrentVersion, Cask: true})
+	}
+	sortByID(pkgs)
+	return pkgs, nil
+}
+
 func miseOutdated() ([]pkg, error) {
 	// --bump also lists tools held back by the version in the config; `bump` is set on those.
 	out, err := output("mise", "outdated", "--bump", "--json")
@@ -318,6 +414,9 @@ func pnpmOutdated() ([]pkg, error) {
 	out, err := output("pnpm", "outdated", "--global", "--format", "json")
 	if err != nil {
 		return nil, err
+	}
+	if bytes.Contains(out, []byte("ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND")) {
+		return nil, nil // nothing installed globally yet
 	}
 	var m map[string]struct{ Current, Latest string }
 	if len(bytes.TrimSpace(out)) > 0 {
@@ -423,23 +522,6 @@ func nugetLatest(id string) (string, error) {
 		}
 	}
 	return "", nil
-}
-
-// yarnCheck refuses corepack's yarn shim before corepack has fetched yarn: running it would
-// stop at corepack's download prompt.
-func yarnCheck() error {
-	path, _ := exec.LookPath("yarn")
-	if !strings.Contains(strings.ToLower(path), "corepack") {
-		return nil
-	}
-	home := os.Getenv("COREPACK_HOME")
-	if home == "" {
-		home = filepath.Join(os.Getenv("LOCALAPPDATA"), "node", "corepack")
-	}
-	if _, err := os.Stat(filepath.Join(home, "v1", "yarn")); err != nil {
-		return fmt.Errorf("only corepack's shim, yarn itself is not downloaded: corepack install -g yarn@1")
-	}
-	return nil
 }
 
 // yarnOutdated covers yarn 1, the only yarn with global packages.

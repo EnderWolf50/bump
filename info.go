@@ -85,6 +85,26 @@ func scoopInfo(p pkg) (details, error) {
 	return details{Released: updated, Homepage: info.Website}, nil
 }
 
+// brewInfo has no release date: brew does not keep one.
+func brewInfo(p pkg) (details, error) {
+	args := []string{"info", "--json=v2", p.ID}
+	if p.Cask {
+		args = []string{"info", "--json=v2", "--cask", p.ID}
+	}
+	out, err := output("brew", args...)
+	if err != nil {
+		return details{}, err
+	}
+	var doc struct{ Formulae, Casks []struct{ Homepage string } }
+	if err := json.Unmarshal(out, &doc); err != nil {
+		return details{}, fmt.Errorf("brew info: %w", err)
+	}
+	if all := append(doc.Formulae, doc.Casks...); len(all) > 0 {
+		return details{Homepage: all[0].Homepage}, nil
+	}
+	return details{}, nil
+}
+
 // npmInfo serves npm, pnpm, yarn and bun: they all install from the npm registry.
 func npmInfo(p pkg) (details, error) {
 	var doc struct {

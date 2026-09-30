@@ -37,7 +37,7 @@ func TestConfigMistakesAreErrors(t *testing.T) {
 	for text, want := range map[string]string{
 		`[theme]` + "\n" + `acent = "#112233"`: "theme.acent",
 		`[theme]` + "\n" + `accent = "orange"`: "theme.accent",
-		`skip = ["brew"]`:                      `"brew"`,
+		`skip = ["pip"]`:                       `"pip"`,
 		`ignore = ["Git.Git"]`:                 `"Git.Git"`,
 		`timeout = "soon"`:                     "timeout",
 		`sidebar_width = 5`:                    "sidebar_width",

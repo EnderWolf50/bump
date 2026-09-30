@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -126,8 +129,50 @@ func TestGoProxyAndInstall(t *testing.T) {
 		t.Errorf("goProxy = %s", got)
 	}
 	p := pkg{Source: "go", ID: "golang.org/x/tools/gopls", Dir: `C:\Users\o'neil\.local\bin`}
-	want := `$env:GOBIN = 'C:\Users\o''neil\.local\bin'; go install golang.org/x/tools/gopls@v0.21.0`
-	if got := goInstall(p, "v0.21.0"); got[len(got)-1] != want {
-		t.Errorf("goInstall = %q", got[len(got)-1])
+	want := `GOBIN=C:\Users\o'neil\.local\bin go install golang.org/x/tools/gopls@v0.21.0`
+	if got := strings.Join(goInstall(p, "v0.21.0"), " "); got != want {
+		t.Errorf("goInstall = %q", got)
+	}
+}
+
+func TestParseBrew(t *testing.T) {
+	out := `{"formulae":[{"name":"node","installed_versions":["23.1.0","24.0.1"],"current_version":"24.1.0","pinned":false,"pinned_version":null},
+{"name":"go","installed_versions":["1.26.0"],"current_version":"1.27.1","pinned":true,"pinned_version":"1.26.0"}],
+"casks":[{"name":"firefox","installed_versions":"140.0","current_version":"141.0"},
+{"name":"iterm2","installed_versions":["3.5.0"],"current_version":"3.5.1"}]}`
+	pkgs, err := parseBrew([]byte(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []pkg{
+		{Source: "brew", ID: "firefox", Current: "140.0", Latest: "141.0", Cask: true},
+		{Source: "brew", ID: "go", Current: "1.26.0", Latest: "1.27.1", Pin: "brew unpin go"},
+		{Source: "brew", ID: "iterm2", Current: "3.5.0", Latest: "3.5.1", Cask: true},
+		{Source: "brew", ID: "node", Current: "24.0.1", Latest: "24.1.0"},
+	}
+	if fmt.Sprint(pkgs) != fmt.Sprint(want) {
+		t.Errorf("got %+v", pkgs)
+	}
+	if got := sourceNamed("brew").upgrade(pkgs[0], ""); strings.Join(got, " ") != "brew upgrade --cask firefox" {
+		t.Errorf("cask upgrade = %q", got)
+	}
+}
+
+func TestCommandEnv(t *testing.T) {
+	c := command(context.Background(), []string{"GOBIN=/x y", "go", "install", "a@v1"})
+	if !slices.Equal(c.Args, []string{"go", "install", "a@v1"}) || c.Env[len(c.Env)-1] != "GOBIN=/x y" {
+		t.Errorf("args %q, env ends %q", c.Args, c.Env[len(c.Env)-1])
+	}
+	if c := command(context.Background(), []string{"npm", "install", "a=b"}); c.Env != nil || len(c.Args) != 3 {
+		t.Errorf("a plain command got env %q, args %q", c.Env, c.Args)
+	}
+}
+
+func TestSupported(t *testing.T) {
+	if !(source{}).supported() {
+		t.Error("a manager with no platforms listed runs everywhere")
+	}
+	if (source{platforms: []string{"plan9-only"}}).supported() {
+		t.Error("a manager for another platform counts as supported")
 	}
 }

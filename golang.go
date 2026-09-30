@@ -121,8 +121,7 @@ func goInstall(p pkg, version string) []string {
 	if version == "" {
 		version = "latest"
 	}
-	dir := strings.ReplaceAll(p.Dir, "'", "''")
-	return []string{"pwsh", "-NoProfile", "-Command", fmt.Sprintf("$env:GOBIN = '%s'; go install %s@%s", dir, p.ID, version)}
+	return []string{"GOBIN=" + p.Dir, "go", "install", p.ID + "@" + version}
 }
 
 // goProxy is a module proxy URL; upper-case letters in a module path are written as

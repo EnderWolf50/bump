@@ -1,16 +1,19 @@
 # bump
 
-Upgrade the packages of every package manager on a Windows machine from one screen: see
-what is outdated, pick what to upgrade and to which version, review, and watch it run.
+Upgrade the packages of every package manager on a machine from one screen: see what is
+outdated, pick what to upgrade and to which version, review, and watch it run. Runs on
+Windows, macOS and Linux.
 
-bump asks winget, scoop, mise, npm, pnpm, yarn, bun, uv, dotnet, cargo and go at once. Each
-answers when it can; a manager that is missing or fails is shown as such rather than
-holding the others up.
+bump asks winget and scoop (Windows), brew (macOS, Linux), mise, npm, pnpm, yarn, bun, uv,
+dotnet, cargo and go at once. Each answers when it can; a manager that is missing or fails
+is shown as such rather than holding the others up. Managers that do not exist on your
+platform are not shown at all.
 
 ## Install
 
-Download `bump.exe` from the [latest release](https://github.com/EnderWolf50/bump/releases/latest)
-and put it on your `PATH`, or build it with Go 1.27+:
+Download the archive for your platform from the
+[latest release](https://github.com/EnderWolf50/bump/releases/latest) and put `bump` (`bump.exe`
+on Windows) on your `PATH`, or build it with Go 1.27+:
 
 ```sh
 go install github.com/EnderWolf50/bump@latest
@@ -22,7 +25,7 @@ go install github.com/EnderWolf50/bump@latest
 bump                 pick what to upgrade, and to which version
 bump -l              only list what is outdated
 bump -y              upgrade everything that is outdated and not pinned
-bump scoop mise      limit to some managers (works with -l and -y too)
+bump npm mise        limit to some managers (works with -l and -y too)
 ```
 
 In the picker the sidebar lists the managers (`?` not installed, `!` check failed) and the
@@ -40,13 +43,17 @@ table the outdated packages of the one selected:
 | `←` `h` `esc` `q` | back to the sidebar |
 
 The go manager covers programs installed with `go install`: bump reads which module and
-version each binary in GOBIN, GOPATH\bin and ~/.local/bin was built from, asks the Go
+version each binary in GOBIN, GOPATH's bin and ~/.local/bin was built from, asks the Go
 module proxy for newer versions, and installs the new one into the same folder. Binaries
 built from a checkout (`go build`) have no released version to compare, so they are left
 out. A release can take a few minutes to show, while the proxy's cache catches up.
 
-Pinned packages (winget pins, scoop holds, versions fixed in mise's config) are listed but
-never upgraded; bump shows how to unpin them. Scoop can only install the latest version.
+A yarn or pnpm that is only corepack's shim, with the manager itself never downloaded, counts
+as not installed; bump asks the shim rather than guessing from where it is installed.
+
+Pinned packages (winget pins, scoop holds, brew pins, versions fixed in mise's config) are
+listed but never upgraded; bump shows how to unpin them. Scoop and brew can only install the
+latest version.
 
 ## Settings
 

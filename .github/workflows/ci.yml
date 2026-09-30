@@ -7,8 +7,11 @@ on:
 
 jobs:
   test:
-    # The tool drives Windows package managers and the Windows registry.
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
