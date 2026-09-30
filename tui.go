@@ -670,9 +670,9 @@ func (m model) viewList() string {
 		if in == nil {
 			in = &info{}
 		}
-		detail[0] = styleSource.Render(r.ID) + styleDim.Render("  from "+r.Source)
+		detail[0] = styleSource.Render(r.ID) + styleDim.Render(" · from "+r.Source)
 		if link := in.d.link(); link != "" {
-			detail[0] += "  " + link
+			detail[0] += styleDim.Render(" · " + link)
 		}
 		released := ""
 		switch {
