@@ -75,9 +75,9 @@ func TestModel(t *testing.T) {
 	if n := len(m.shown); n != 1 {
 		t.Fatalf("scoop shows %d rows", n)
 	}
-	m, _ = press(m, "space") // not the table's yet: chooses nothing
-	if m.rows[2].act != actNone {
-		t.Fatal("space chose from the sidebar")
+	m, _ = press(m, "space") // not the table's yet: picks nothing
+	if m.rows[2].picked {
+		t.Fatal("space picked from the sidebar")
 	}
 
 	// enter opens the table; a upgrades what it shows; q/h/esc return to the sidebar.
@@ -101,22 +101,18 @@ func TestModel(t *testing.T) {
 		t.Fatal("h did not go back to the sidebar")
 	}
 
-	// all: space chooses the row under the cursor and leaves the cursor there; x uninstalls.
+	// all: space picks the row under the cursor and leaves the cursor there.
 	m, _ = press(m, "k")
 	m, _ = press(m, "k")
 	m, _ = press(m, "enter")
 	m, _ = press(m, "space")
-	if m.table.Cursor() != 0 || m.rows[0].act != actUpgrade {
-		t.Fatalf("space: cursor %d, act %d", m.table.Cursor(), m.rows[0].act)
+	if m.table.Cursor() != 0 || !m.rows[0].picked {
+		t.Fatalf("space: cursor %d, picked %v", m.table.Cursor(), m.rows[0].picked)
 	}
-	m, _ = press(m, "j") // the pinned one: space refuses it, x does not
+	m, _ = press(m, "j") // the pinned one: space refuses it
 	m, _ = press(m, "space")
-	if m.rows[1].act != actNone {
-		t.Fatal("chose to upgrade a pinned package")
-	}
-	m, _ = press(m, "x")
-	if m.rows[1].act != actRemove {
-		t.Fatal("x did not mark the pinned package for uninstalling")
+	if m.rows[1].picked {
+		t.Fatal("picked a pinned package")
 	}
 
 	// enter saves into the review first; esc returns, enter again starts the run.
@@ -139,7 +135,6 @@ func TestModel(t *testing.T) {
 	want := []string{
 		"winget upgrade --id Git.Git --exact --accept-package-agreements --accept-source-agreements --disable-interactivity",
 		"pwsh -NoProfile -Command scoop update 7zip",
-		"winget uninstall --id pinned --exact --disable-interactivity --accept-source-agreements",
 	}
 	if fmt.Sprint(ran) != fmt.Sprint(want) {
 		t.Fatalf("ran\n%v\nwant\n%v", ran, want)
@@ -147,7 +142,7 @@ func TestModel(t *testing.T) {
 
 	// Back to the table: what succeeded is gone, the failure stays, unchosen.
 	m, _ = press(m, "esc")
-	if m.jobs != nil || len(m.rows) != 1 || m.rows[0].ID != "7zip" || m.rows[0].act != actNone {
+	if m.jobs != nil || len(m.rows) != 2 || m.rows[0].ID != "pinned" || m.rows[1].ID != "7zip" || m.rows[1].picked {
 		t.Fatalf("after the run the table holds %+v", m.rows)
 	}
 }
@@ -168,7 +163,7 @@ func TestVersionPicker(t *testing.T) {
 	m, _ = press(m, "j")
 	m, _ = press(m, "j") // newest minor
 	m, _ = press(m, "enter")
-	if m.picker != nil || m.rows[0].act != actUpgrade || m.rows[0].target != "1.5.0" {
+	if m.picker != nil || !m.rows[0].picked || m.rows[0].target != "1.5.0" {
 		t.Fatalf("after choosing: picker open %v, row %+v", m.picker != nil, m.rows[0])
 	}
 	if got := strings.Join(jobFor(m.rows[0]).command(), " "); !strings.Contains(got, "--version 1.5.0") {
@@ -184,7 +179,7 @@ func TestVersionPicker(t *testing.T) {
 	}
 }
 
-func jobFor(r *row) job { return job{pkg: r.pkg, act: r.act, target: r.target} }
+func jobFor(r *row) job { return job{pkg: r.pkg, target: r.target} }
 
 func TestRefreshKeepsChoices(t *testing.T) {
 	m := newModel([]source{{name: "winget"}})
@@ -200,7 +195,7 @@ func TestRefreshKeepsChoices(t *testing.T) {
 	git.Latest = "3" // a newer release came out meanwhile
 	next, _ = m.Update(loadedMsg{"winget", []pkg{git}, nil})
 	m = next.(model)
-	if len(m.rows) != 1 || m.rows[0].act != actUpgrade || m.rows[0].Latest != "3" {
+	if len(m.rows) != 1 || !m.rows[0].picked || m.rows[0].Latest != "3" {
 		t.Fatalf("after the refresh: %+v", m.rows[0])
 	}
 }
@@ -208,7 +203,7 @@ func TestRefreshKeepsChoices(t *testing.T) {
 // The first frame is drawn before any WindowSizeMsg, and a terminal can be tiny.
 func TestViewAtAnySize(t *testing.T) {
 	m := loaded()
-	m.rows[0].act = actUpgrade
+	m.rows[0].picked = true
 	for _, size := range [][2]int{{0, 0}, {10, 3}, {30, 8}, {200, 60}} {
 		next, _ := m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		s := next.(model)

@@ -65,20 +65,11 @@ func columns(width int) []table.Column {
 	return cols
 }
 
-// action is what saving does to a row.
-type action int
-
-const (
-	actNone action = iota
-	actUpgrade
-	actRemove
-)
-
-// row is one outdated package and what to do with it; a pointer, so the choice survives
+// row is one outdated package and whether to upgrade it; a pointer, so the choice survives
 // switching and filtering.
 type row struct {
 	pkg
-	act    action
+	picked bool
 	target string // a version chosen in the version picker; "" means the latest
 }
 
@@ -126,7 +117,6 @@ type info struct {
 
 var (
 	keyPick     = key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "upgrade"))
-	keyRemove   = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "uninstall"))
 	keyVersions = key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "version"))
 	keyAll      = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "upgrade all shown"))
 	keyFilter   = key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter"))
@@ -216,11 +206,11 @@ func (m *model) check(name string) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// picked counts the rows of one manager (or "all") that saving will act on.
+// picked counts the rows of one manager (or "all") that saving will upgrade.
 func (m model) picked(source string) int {
 	n := 0
 	for _, r := range m.rows {
-		if r.act != actNone && (source == "all" || r.Source == source) {
+		if r.picked && (source == "all" || r.Source == source) {
 			n++
 		}
 	}
@@ -274,14 +264,12 @@ func (m *model) redraw() {
 		level := bump(r.Current, r.to())
 		box, to, change := "[ ]", styleBump[level].Render(r.to()), styleBump[level].Render(bumpName[level])
 		switch {
-		case r.act == actRemove:
-			box, to, change = styleErr.Render("[-]"), styleErr.Render("uninstall"), ""
 		case r.Pin != "":
 			box, to, change = styleDim.Render("pin"), styleDim.Render(r.Latest), styleDim.Render("pinned")
-		case r.act == actUpgrade:
+		case r.picked:
 			box = "[x]"
 		}
-		if r.target != "" && r.act == actUpgrade {
+		if r.target != "" && r.picked {
 			to += styleDim.Render(" *") // chosen, not the latest
 		}
 		cells[i] = table.Row{mark + box, styleSource.Render(r.Source), r.ID, r.Current, to, change}
@@ -356,10 +344,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, p := range msg.pkgs {
 			r := &row{pkg: p}
 			if old := was[p.ID]; old != nil {
-				r.act, r.target = old.act, old.target
-				if r.act == actUpgrade && p.Pin != "" {
-					r.act, r.target = actNone, ""
-				}
+				r.picked, r.target = old.picked && p.Pin == "", old.target
 			}
 			byName[msg.source] = append(byName[msg.source], r)
 		}
@@ -415,7 +400,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) updateSide(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "esc":
-		// Quitting drops the choices, so with some made it asks first.
+		// Quitting drops the picks, so with some made it asks first.
 		if m.picked("all") > 0 {
 			m.confirmQuit = true
 			return m, nil
@@ -461,7 +446,7 @@ func (m model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, m.refresh())
 }
 
-// The table: choose what to do with packages, filter them, save; ←/h/esc/q go back.
+// The table: pick packages and versions, filter them, save; ←/h/esc/q go back.
 func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	r, ok := m.current()
 	switch {
@@ -492,18 +477,8 @@ func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keyPick):
 		if ok && r.Pin != "" {
 			m.status = "pinned; to upgrade it: " + r.Pin
-		} else if ok && r.act == actUpgrade {
-			r.act, r.target = actNone, ""
 		} else if ok {
-			r.act = actUpgrade
-		}
-		m.redraw()
-		return m, nil
-	case key.Matches(msg, keyRemove):
-		if ok && r.act == actRemove {
-			r.act = actNone
-		} else if ok {
-			r.act, r.target = actRemove, ""
+			r.picked = !r.picked
 		}
 		m.redraw()
 		return m, nil
@@ -515,11 +490,11 @@ func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keyAll): // upgrade what the table shows; if all are, undo that
 		all := true
 		for _, r := range m.shown {
-			all = all && (r.act == actUpgrade || r.Pin != "")
+			all = all && (r.picked || r.Pin != "")
 		}
 		for _, r := range m.shown {
-			if r.Pin == "" && r.act != actRemove {
-				r.act, r.target = map[bool]action{true: actNone, false: actUpgrade}[all], ""
+			if r.Pin == "" {
+				r.picked, r.target = !all, ""
 			}
 		}
 		m.redraw()
@@ -632,7 +607,7 @@ func (m model) viewList() string {
 	case t.err != nil:
 		heading += styleErr.Render(" · check failed")
 	default:
-		heading += styleDim.Render(fmt.Sprintf(" · %d outdated · %d chosen", len(m.shown), m.picked(t.name)))
+		heading += styleDim.Render(fmt.Sprintf(" · %d outdated · %d picked", len(m.shown), m.picked(t.name)))
 	}
 	if m.status != "" {
 		heading += "  " + styleErr.Render(m.status)
@@ -666,8 +641,6 @@ func (m model) viewList() string {
 		level := bump(r.Current, r.to())
 		detail[2] = r.Current + styleDim.Render("  →  ") + styleBump[level].Render(r.to()+"  "+bumpName[level])
 		switch {
-		case r.act == actRemove:
-			detail[2] = r.Current + styleErr.Render("  →  uninstall")
 		case r.Pin != "":
 			detail[2] = r.Current + styleDim.Render("  →  "+r.Latest+"  pinned · unpin with  "+r.Pin)
 		case r.target != "":
@@ -699,7 +672,7 @@ func (m model) viewList() string {
 		body = lipgloss.Place(width, lipgloss.Height(body), lipgloss.Center, lipgloss.Center, strings.Join(note, "\n"))
 	}
 
-	keys := []key.Binding{m.table.KeyMap.LineUp, m.table.KeyMap.LineDown, keyPick, keyRemove, keyVersions,
+	keys := []key.Binding{m.table.KeyMap.LineUp, m.table.KeyMap.LineDown, keyPick, keyVersions,
 		keySave, keyBack, keyAll, keyFilter, keyOpen, keyRefresh}
 	if m.filter.Focused() {
 		keys = []key.Binding{

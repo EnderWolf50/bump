@@ -153,7 +153,7 @@ func (m model) updatePicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			if it, ok := p.list.SelectedItem().(pickItem); ok {
-				p.row.act, p.row.target = actUpgrade, it.Version
+				p.row.picked, p.row.target = true, it.Version
 				if it.Version == p.row.Latest {
 					p.row.target = ""
 				}
@@ -173,9 +173,9 @@ func (m model) updatePicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) quitDialog() string {
 	n := m.picked("all")
 	return styleModal.Render(lipgloss.JoinVertical(lipgloss.Center,
-		styleErr.Bold(true).Render("Quit without saving?"),
+		styleErr.Bold(true).Render("Quit without upgrading?"),
 		"",
-		fmt.Sprintf("%d chosen package%s will be left as they are.", n, map[bool]string{true: "", false: "s"}[n == 1]),
+		fmt.Sprintf("%d picked package%s will not be upgraded.", n, map[bool]string{true: "", false: "s"}[n == 1]),
 		"",
 		styleDim.Render("q/y quit · s review and save · esc stay")))
 }
@@ -194,24 +194,21 @@ func (m model) updateQuit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // ---- the review --------------------------------------------------------------------------
 
-// chosen is what saving will do, upgrades first, in list order.
+// chosen is what saving will upgrade, in list order.
 func (m model) chosen() []job {
-	var up, rm []job
+	var jobs []job
 	for _, r := range m.rows {
-		switch r.act {
-		case actUpgrade:
-			up = append(up, job{pkg: r.pkg, act: actUpgrade, target: r.target})
-		case actRemove:
-			rm = append(rm, job{pkg: r.pkg, act: actRemove})
+		if r.picked {
+			jobs = append(jobs, job{pkg: r.pkg, target: r.target})
 		}
 	}
-	return append(up, rm...)
+	return jobs
 }
 
 func (m model) startReview() (tea.Model, tea.Cmd) {
 	jobs := m.chosen()
 	if len(jobs) == 0 {
-		m.status = "nothing chosen yet: space upgrades, x uninstalls"
+		m.status = "nothing picked yet: space picks a package"
 		return m, nil
 	}
 	width := m.review.Width()
@@ -219,24 +216,15 @@ func (m model) startReview() (tea.Model, tea.Cmd) {
 	var lines []string
 	majors := 0
 	for _, j := range jobs {
-		what := ""
-		if j.act == actRemove {
-			what = styleErr.Render("uninstall")
-		} else {
-			level := bump(j.Current, j.to())
-			what = styleDim.Render("→  ") + styleBump[level].Render(fit(j.to(), 16)+"  "+bumpName[level])
-			if level == bumpMajor {
-				majors++
-			}
-			if j.target != "" {
-				what += styleDim.Render("  chosen")
-			}
+		level := bump(j.Current, j.to())
+		what := styleDim.Render("→  ") + styleBump[level].Render(fit(j.to(), 16)+"  "+bumpName[level])
+		if level == bumpMajor {
+			majors++
 		}
-		icon := styleOK.Render("↑")
-		if j.act == actRemove {
-			icon = styleErr.Render("✗")
+		if j.target != "" {
+			what += styleDim.Render("  chosen")
 		}
-		lines = append(lines, ansi.Truncate(fmt.Sprintf("%s %s  %s %s  %s", icon,
+		lines = append(lines, ansi.Truncate(fmt.Sprintf("%s %s  %s %s  %s", styleOK.Render("↑"),
 			styleSource.Render(fit(j.Source, 6)), fit(j.ID, idWidth), fit(j.Current, 16), what), width, "…"))
 	}
 	if majors > 0 {
@@ -264,15 +252,7 @@ func (m model) updateReview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) viewReview() string {
-	up, rm := 0, 0
-	for _, j := range m.chosen() {
-		if j.act == actRemove {
-			rm++
-		} else {
-			up++
-		}
-	}
-	title := styleTabOn.Render("Review") + styleDim.Render(fmt.Sprintf(" · %d to upgrade · %d to uninstall", up, rm))
+	title := styleTabOn.Render("Review") + styleDim.Render(fmt.Sprintf(" · %d to upgrade", len(m.chosen())))
 	help := styleDim.Render("enter/s start · esc/q back to the list · ↑/k ↓/j scroll")
 	return stylePanel.BorderForeground(colorAccent).Width(m.w).Height(m.h).Render(
 		title + "\n\n" + m.review.View() + "\n" + help)
@@ -280,10 +260,9 @@ func (m model) viewReview() string {
 
 // ---- the run ------------------------------------------------------------------------------
 
-// job is one upgrade or uninstall on the progress screen.
+// job is one upgrade on the progress screen.
 type job struct {
 	pkg
-	act    action
 	target string // "" means the latest
 	state  int
 	last   string // the latest output line
@@ -303,13 +282,7 @@ func (j job) to() string {
 	return j.Latest
 }
 
-func (j job) command() []string {
-	s := sourceNamed(j.Source)
-	if j.act == actRemove {
-		return s.remove(j.pkg)
-	}
-	return s.upgrade(j.ID, j.target)
-}
+func (j job) command() []string { return sourceNamed(j.Source).upgrade(j.ID, j.target) }
 
 // start runs what the review listed and switches to the progress screen.
 func (m model) start() (tea.Model, tea.Cmd) {
@@ -353,7 +326,7 @@ func (m model) updateJobs(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "q":
 		return m, tea.Quit
 	case "enter", "esc":
-		// Back to the table without what was done; the failures stay, unchosen.
+		// Back to the table without what was upgraded; the failures stay, unpicked.
 		done := map[string]bool{}
 		for _, j := range m.jobs {
 			done[j.Source+"/"+j.ID] = j.state == jobOK
@@ -361,7 +334,7 @@ func (m model) updateJobs(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		var rows []*row
 		for _, r := range m.rows {
 			if !done[r.key()] {
-				r.act, r.target = actNone, ""
+				r.picked, r.target = false, ""
 				rows = append(rows, r)
 			}
 		}
@@ -384,10 +357,10 @@ func (m model) viewJobs() string {
 			current = i
 		}
 	}
-	title := fmt.Sprintf("Working on %d of %d", min(done+1, len(m.jobs)), len(m.jobs))
+	title := fmt.Sprintf("Upgrading %d of %d", min(done+1, len(m.jobs)), len(m.jobs))
 	help := "ctrl+c abort"
 	if !m.running {
-		title = fmt.Sprintf("Done: %d succeeded, %d failed", done-failed, failed)
+		title = fmt.Sprintf("Done: %d upgraded, %d failed", done-failed, failed)
 		help = "enter/esc back to the list · q quit"
 		if done < len(m.jobs) {
 			title += fmt.Sprintf(", %d not run", len(m.jobs)-done)
@@ -411,9 +384,6 @@ func (m model) viewJobs() string {
 			icon, last = styleErr.Render("✗"), styleErr.Render(j.last)
 		}
 		what := "→ " + j.to()
-		if j.act == actRemove {
-			what = "uninstall"
-		}
 		line := fmt.Sprintf("%s %s  %s %s  %s", icon,
 			styleSource.Render(fit(j.Source, 6)), fit(j.ID, idWidth), fit(what, 18), last)
 		lines = append(lines, ansi.Truncate(line, width, "…"))

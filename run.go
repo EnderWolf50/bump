@@ -26,7 +26,7 @@ type (
 	allDoneMsg struct{}
 )
 
-// runJobs runs the upgrades and uninstalls one after another (package managers do not like
+// runJobs runs the upgrades one after another (package managers do not like
 // running twice at once) and reports every output line; it stops early when ctx is cancelled.
 func runJobs(ctx context.Context, jobs []job, ch chan<- tea.Msg) {
 	defer close(ch)
