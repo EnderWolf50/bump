@@ -22,6 +22,7 @@ and cargo (their global packages)
   bump -y, --yes       upgrade everything that is outdated and not pinned
   bump <source>...     limit to some sources, e.g. 'bump scoop mise'
 
+  bump --version        print the version
   bump --config         show where the settings file is
   bump --default-config print the default settings, a starting point for your own
 
@@ -42,6 +43,9 @@ func main() {
 			yes = true
 		case "-h", "--help":
 			fmt.Println(usage)
+			return
+		case "-v", "--version":
+			fmt.Println("bump", versionString())
 			return
 		case "--default-config":
 			fmt.Print(defaultConfig)
