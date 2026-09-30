@@ -166,12 +166,14 @@ func TestVersionPicker(t *testing.T) {
 	}
 	next, _ := m.Update(versionsMsg{"winget/Git.Git", []release{{Version: "3.0.0"}, {Version: "2.1.0"}, {Version: "1.5.0"}}, nil})
 	m = next.(model)
-	// latest (2), newest major (3.0.0), newest minor (1.5.0), then the three versions
-	if n := len(m.picker.list.Items()); n != 6 {
-		t.Fatalf("picker has %d lines, want 6", n)
+	// each version once, newest first, the latest (2) placed among them: 3.0.0, 2.1.0, 2, 1.5.0
+	if n := len(m.picker.list.Items()); n != 4 {
+		t.Fatalf("picker has %d lines, want 4", n)
 	}
-	m, _ = press(m, "j")
-	m, _ = press(m, "j") // newest minor
+	if it := m.picker.list.SelectedItem().(pickItem); it.Version != "2" || it.label != "latest" {
+		t.Fatalf("the picker starts on %+v, want the latest", it)
+	}
+	m, _ = press(m, "j") // 1.5.0, the newest minor
 	m, _ = press(m, "enter")
 	if m.picker != nil || !m.rows[0].picked || m.rows[0].target != "1.5.0" {
 		t.Fatalf("after choosing: picker open %v, row %+v", m.picker != nil, m.rows[0])

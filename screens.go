@@ -69,35 +69,44 @@ type picker struct {
 // resize fits the picker to its lines, within the screen.
 func (p *picker) resize(w, h int) {
 	p.w, p.h = w, h
-	p.list.SetSize(min(66, max(w-8, 20)), min(max(len(p.list.Items())+3, 6), max(h-10, 4)))
+	// Room for every line plus the title and its gap, so short lists are not split in pages.
+	p.list.SetSize(min(66, max(w-8, 20)), min(max(len(p.list.Items())+4, 6), max(h-10, 4)))
 }
 
-// fill turns the looked-up versions into the picker's lines: the latest, the newest of each
-// kind of change, then every version.
+// fill turns the looked-up versions into the picker's lines, newest first, each version
+// once. The latest and the newest of each kind of change are labeled where they are; the
+// cursor starts on the version the row goes to now.
 func (p *picker) fill(rs []release, err error) {
 	p.loading, p.err = false, err
 	if err != nil {
 		return
 	}
 	cur := p.row.Current
-	items := []list.Item{pickItem{"latest", release{Version: p.row.Latest}, bump(cur, p.row.Latest)}}
-	sc := shortcuts(rs, cur)
-	for _, level := range []int{bumpMajor, bumpMinor, bumpPatch} {
-		if r, ok := sc[level]; ok && r.Version != p.row.Latest {
-			items = append(items, pickItem{"newest " + bumpName[level], r, level})
-		}
-	}
+	// The manager's latest can be missing from the list (a registry that lags, say).
+	found := false
 	for _, r := range rs {
-		items = append(items, pickItem{"", r, bump(cur, r.Version)})
+		found = found || r.Version == p.row.Latest
 	}
-	// The latest often knows its date only from the full list.
-	for _, r := range rs {
-		if r.Version == p.row.Latest {
-			items[0] = pickItem{"latest", r, bump(cur, r.Version)}
+	if !found {
+		rs = newer(append(rs, release{Version: p.row.Latest}), cur)
+	}
+
+	labels := map[string]string{}
+	for level, r := range shortcuts(rs, cur) {
+		labels[r.Version] = "newest " + bumpName[level]
+	}
+	labels[p.row.Latest] = "latest"
+	items := make([]list.Item, len(rs))
+	at := 0
+	for i, r := range rs {
+		items[i] = pickItem{labels[r.Version], r, bump(cur, r.Version)}
+		if r.Version == p.row.to() {
+			at = i
 		}
 	}
 	p.list.SetItems(items)
 	p.resize(p.w, p.h)
+	p.list.Select(at)
 }
 
 func (p *picker) view(spin string) string {
