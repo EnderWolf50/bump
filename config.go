@@ -22,13 +22,16 @@ const defaultConfig = `# bump's settings. Every key is optional: one left out ke
 # Colors are "#rrggbb" or an ANSI color number, "0" to "255".
 
 # Package managers to leave out: they are neither checked nor shown. Naming one on the
-# command line ("bump cargo") still checks it.
+# command line ("bump cargo") still checks it. Managers that do not exist on this platform
+# (winget and scoop outside Windows, brew on Windows) are left out anyway, so one file can
+# serve every machine.
 skip = []
 
 # Packages never to list, as "manager:id", e.g. "winget:Microsoft.VisualStudio.2022.BuildTools".
 ignore = []
 
-# Leave pinned packages (winget pins, scoop holds, fixed versions in mise) out of the list.
+# Leave pinned packages (winget pins, scoop holds, brew pins, fixed versions in mise) out of
+# the list.
 hide_pinned = false
 
 # How long a package manager may take to answer before bump gives up on it.
