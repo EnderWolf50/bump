@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattn/go-runewidth"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type pkg struct {
@@ -192,7 +192,7 @@ func outputOf(c *exec.Cmd) ([]byte, error) {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	// The timeout stops a package manager that hangs, say on a prompt nobody can answer.
-	timeout := cfg.Timeout.Duration
+	timeout := cfg.Timeout
 	timer := time.AfterFunc(timeout, func() { c.Process.Kill() })
 	err := c.Wait()
 	if !timer.Stop() {
@@ -265,33 +265,20 @@ func wingetTable(out string, cols ...string) [][]string {
 		if strings.HasPrefix(line, "---") {
 			continue
 		}
-		if strings.TrimSpace(line) == "" || runewidth.StringWidth(line) < at[len(at)-1] {
+		if strings.TrimSpace(line) == "" || ansi.StringWidth(line) < at[len(at)-1] {
 			break // end of the table ("37 upgrades available.")
 		}
 		row := make([]string, len(cols))
 		for i := range cols {
-			end := runewidth.StringWidth(line)
+			end := ansi.StringWidth(line)
 			if i+1 < len(at) {
 				end = at[i+1]
 			}
-			row[i] = cells(line, at[i], end)
+			row[i] = strings.TrimSpace(ansi.Cut(line, at[i], end))
 		}
 		rows = append(rows, row)
 	}
 	return rows
-}
-
-// cells returns the text between two display columns, trimmed.
-func cells(s string, from, to int) string {
-	var b strings.Builder
-	col := 0
-	for _, r := range s {
-		if col >= from && col < to {
-			b.WriteRune(r)
-		}
-		col += runewidth.RuneWidth(r)
-	}
-	return strings.TrimSpace(b.String())
 }
 
 func scoopOutdated() ([]pkg, error) {
@@ -516,29 +503,17 @@ func dotnetOutdated() ([]pkg, error) {
 	}
 	var pkgs []pkg
 	for _, t := range list.Data {
-		latest, err := nugetLatest(t.PackageID)
+		p := pkg{Source: "dotnet", ID: t.PackageID, Current: t.Version}
+		rs, err := nugetVersions(p)
 		if err != nil {
 			return nil, err
 		}
-		if latest != "" && latest != t.Version {
-			pkgs = append(pkgs, pkg{Source: "dotnet", ID: t.PackageID, Current: t.Version, Latest: latest})
+		if len(rs) > 0 {
+			p.Latest = rs[0].Version
+			pkgs = append(pkgs, p)
 		}
 	}
 	return pkgs, nil
-}
-
-func nugetLatest(id string) (string, error) {
-	var idx struct{ Versions []string }
-	if err := getJSON("https://api.nuget.org/v3-flatcontainer/"+strings.ToLower(id)+"/index.json", &idx); err != nil {
-		return "", err
-	}
-	// Oldest first; a "-" marks a prerelease.
-	for i := len(idx.Versions) - 1; i >= 0; i-- {
-		if !strings.Contains(idx.Versions[i], "-") {
-			return idx.Versions[i], nil
-		}
-	}
-	return "", nil
 }
 
 // yarnOutdated covers yarn 1, the only yarn with global packages.
@@ -656,8 +631,6 @@ func part(nums []string, i int) int {
 
 // fit pads s to n cells, or cuts it with "…" when longer.
 func fit(s string, n int) string {
-	if runewidth.StringWidth(s) > n {
-		s = runewidth.Truncate(s, n, "…")
-	}
-	return runewidth.FillRight(s, n)
+	s = ansi.Truncate(s, n, "…")
+	return s + strings.Repeat(" ", max(n-ansi.StringWidth(s), 0))
 }

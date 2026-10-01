@@ -62,12 +62,12 @@ row_chosen_cursor = "#4d3b19"
 `
 
 type config struct {
-	Skip         []string `toml:"skip"`
-	Ignore       []string `toml:"ignore"`
-	HidePinned   bool     `toml:"hide_pinned"`
-	Timeout      duration `toml:"timeout"`
-	SidebarWidth int      `toml:"sidebar_width"`
-	Theme        theme    `toml:"theme"`
+	Skip         []string      `toml:"skip"`
+	Ignore       []string      `toml:"ignore"`
+	HidePinned   bool          `toml:"hide_pinned"`
+	Timeout      time.Duration `toml:"timeout"`
+	SidebarWidth int           `toml:"sidebar_width"`
+	Theme        theme         `toml:"theme"`
 }
 
 type theme struct {
@@ -85,13 +85,6 @@ type theme struct {
 	RowPickedCursor string `toml:"row_picked_cursor"`
 	RowChosen       string `toml:"row_chosen"`
 	RowChosenCursor string `toml:"row_chosen_cursor"`
-}
-
-type duration struct{ time.Duration }
-
-func (d *duration) UnmarshalText(b []byte) (err error) {
-	d.Duration, err = time.ParseDuration(string(b))
-	return err
 }
 
 // cfg is the settings in force: the defaults until main loads the user's file. Set in init,
@@ -144,7 +137,7 @@ func loadConfig(path string) (config, error) {
 // a typo in a key or a value is an error, not a setting silently ignored.
 func parseConfig(base config, text string) (config, error) {
 	c := base
-	c.Skip, c.Ignore = nil, nil // lists replace, not extend, the defaults
+	c.Skip, c.Ignore = nil, nil // toml writes a list over the base's in place, keeping its tail
 	md, err := toml.Decode(text, &c)
 	if err != nil {
 		return base, err
@@ -174,7 +167,7 @@ func parseConfig(base config, text string) (config, error) {
 			return base, fmt.Errorf("ignore: %q is not \"manager:id\"", entry)
 		}
 	}
-	if c.Timeout.Duration <= 0 {
+	if c.Timeout <= 0 {
 		return base, errors.New("timeout must be more than zero")
 	}
 	if c.SidebarWidth < 20 {

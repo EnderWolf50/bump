@@ -128,9 +128,8 @@ type missingError string
 
 func (e missingError) Error() string { return string(e) }
 
-// ask gets a package manager's outdated packages; a missing tool or a crash in its parser
-// comes back as an error like any other, so one manager never takes the others down.
-// ask is what s has outdated; fresh asks past its caches, where it has any.
+// ask is what s has outdated; fresh asks past its caches, where it has any. A missing tool
+// or a crash in its parser comes back as an error, so one manager never takes the others down.
 func ask(s source, fresh bool) (pkgs []pkg, err error) {
 	if why := s.missing(); why != "" {
 		return nil, missingError(why)

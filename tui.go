@@ -182,8 +182,8 @@ func newModel(srcs []source) model {
 
 func (m model) Init() tea.Cmd { return m.check("all", false) }
 
-// check asks one package manager, or all of them, again; loadedMsg brings each answer.
-// check asks the manager named name (or "all") what is outdated; fresh asks past its caches.
+// check asks the manager named name (or "all") what is outdated, fresh past its caches;
+// loadedMsg brings each answer.
 func (m *model) check(name string, fresh bool) tea.Cmd {
 	cmds := []tea.Cmd{m.spinner.Tick}
 	for i, t := range m.tabs[1:] {

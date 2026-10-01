@@ -21,7 +21,7 @@ major = "196"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(c.Skip, ",") != "cargo" || c.Timeout.Duration != 90*time.Second {
+	if strings.Join(c.Skip, ",") != "cargo" || c.Timeout != 90*time.Second {
 		t.Errorf("skip %v, timeout %v", c.Skip, c.Timeout)
 	}
 	if c.Theme.Accent != "#112233" || c.Theme.Major != "196" {
@@ -74,5 +74,18 @@ hide_pinned = true`)
 		if got := c.keep(tc.p); got != tc.keep {
 			t.Errorf("keep(%s:%s pinned=%v) = %v", tc.p.Source, tc.p.ID, tc.p.Pin != "", got)
 		}
+	}
+}
+
+func TestListsReplaceTheBase(t *testing.T) {
+	base := cfg
+	base.Ignore = []string{"go:a", "go:b"}
+	c, err := parseConfig(base, `ignore = ["go:c"]`)
+	if err != nil || strings.Join(c.Ignore, ",") != "go:c" {
+		t.Fatalf("got %v, %v", c.Ignore, err)
+	}
+	c, _ = parseConfig(base, `timeout = "1m"`)
+	if strings.Join(c.Ignore, ",") != "go:a,go:b" || c.Timeout != time.Minute {
+		t.Fatalf("got %v, %v", c.Ignore, c.Timeout)
 	}
 }
