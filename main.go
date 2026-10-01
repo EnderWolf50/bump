@@ -103,8 +103,8 @@ func main() {
 // platform the settings do not skip.
 func selected(only []string) ([]source, error) {
 	for _, name := range only {
-		switch s := sourceNamed(name); {
-		case s.name == "":
+		switch s, ok := sourceNamed(name); {
+		case !ok:
 			return nil, fmt.Errorf("no package manager called %q", name)
 		case !s.supported():
 			return nil, fmt.Errorf("%s does not run on %s", name, runtime.GOOS)
@@ -148,11 +148,12 @@ func ask(s source, fresh bool) (pkgs []pkg, err error) {
 			err = missingError("not installed (only corepack's shim): corepack install -g " + s.corepack)
 		}
 	}()
-	lookup := s.outdated
+	outdated := s.outdated
 	if fresh && s.fresh != nil {
-		lookup = s.fresh
+		outdated = s.fresh
 	}
-	pkgs, err = lookup()
+	pkgs, err = outdated()
+	sortByID(pkgs)
 	return slices.DeleteFunc(pkgs, func(p pkg) bool { return !cfg.keep(p) }), err
 }
 
@@ -201,7 +202,7 @@ func upgrade(pkgs []pkg) {
 		if p.Pin != "" {
 			continue
 		}
-		args := upgradeCommand(p)
+		args := p.upgrade("")
 		fmt.Printf("\n\x1b[1m> %s\x1b[0m\n", strings.Join(args, " "))
 		c := command(context.Background(), args)
 		c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr

@@ -34,7 +34,7 @@ func runJobs(ctx context.Context, jobs []job, ch chan<- tea.Msg) {
 			return
 		}
 		ch <- jobStartMsg{i}
-		args := j.command()
+		args := j.upgrade(j.target)
 		c := command(ctx, args)
 		pr, pw := io.Pipe()
 		c.Stdout, c.Stderr = pw, pw

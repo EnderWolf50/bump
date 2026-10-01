@@ -115,14 +115,14 @@ func (p *picker) view(spin string) string {
 		body = p.list.Title + "\n\n" + styleErr.Render(ansi.Truncate(p.err.Error(), p.list.Width(), "…"))
 	}
 	hint := help.New().ShortHelpView([]key.Binding{keyMove, keyFilter, keyPickChoose, keyPickCancel})
-	if sourceNamed(p.row.Source).name == "mise" {
+	if p.row.Source == "mise" {
 		hint = styleDim.Render("a chosen version is written to mise's global config") + "\n" + hint
 	}
 	return stylePicker.Render(body + "\n\n" + hint)
 }
 
 func (m model) openPicker(r *row) (tea.Model, tea.Cmd) {
-	s := sourceNamed(r.Source)
+	s, _ := sourceNamed(r.Source)
 	switch {
 	case r.Pin != "":
 		m.status = "pinned; to upgrade it: " + r.Pin
@@ -133,7 +133,7 @@ func (m model) openPicker(r *row) (tea.Model, tea.Cmd) {
 	}
 	l := list.New(nil, pickDelegate{}, 40, 10)
 	l.Title = r.ID + styleDim.Render(" · now "+r.Current)
-	l.Styles.Title = styleTabOn
+	l.Styles.Title = styleSource
 	l.Styles.TitleBar = lipgloss.NewStyle().PaddingBottom(1)
 	l.DisableQuitKeybindings()
 	l.SetShowStatusBar(false)
@@ -205,7 +205,7 @@ func (m model) chosen() []job {
 	var jobs []job
 	for _, r := range m.rows {
 		if r.picked {
-			jobs = append(jobs, job{pkg: r.pkg, target: r.target})
+			jobs = append(jobs, job{choice: r.choice})
 		}
 	}
 	return jobs
@@ -257,7 +257,7 @@ func (m model) updateReview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) viewReview() string {
-	title := styleTabOn.Render("Review") + styleDim.Render(fmt.Sprintf(" · %d to upgrade", len(m.chosen())))
+	title := styleSource.Render("Review") + styleDim.Render(fmt.Sprintf(" · %d to upgrade", len(m.chosen())))
 	help := m.help.ShortHelpView([]key.Binding{keyReviewStart, keyReviewBack, keyScroll})
 	return stylePanel.BorderForeground(colorAccent).Width(m.w).Height(m.h).Render(
 		title + "\n\n" + m.review.View() + "\n" + help)
@@ -267,10 +267,9 @@ func (m model) viewReview() string {
 
 // job is one upgrade on the progress screen.
 type job struct {
-	pkg
-	target string // "" means the latest
-	state  int
-	last   string // the latest output line
+	choice
+	state int
+	last  string // the latest output line
 }
 
 const (
@@ -279,15 +278,6 @@ const (
 	jobOK
 	jobFailed
 )
-
-func (j job) to() string {
-	if j.target != "" {
-		return j.target
-	}
-	return j.Latest
-}
-
-func (j job) command() []string { return sourceNamed(j.Source).upgrade(j.pkg, j.target) }
 
 // start runs what the review listed and switches to the progress screen.
 func (m model) start() (tea.Model, tea.Cmd) {
@@ -334,7 +324,7 @@ func (m model) updateJobs(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Back to the table without what was upgraded; the failures stay, unpicked.
 		done := map[string]bool{}
 		for _, j := range m.jobs {
-			done[j.Source+"/"+j.ID] = j.state == jobOK
+			done[j.key()] = j.state == jobOK
 		}
 		var rows []*row
 		for _, r := range m.rows {
@@ -393,7 +383,7 @@ func (m model) viewJobs() string {
 		lines = append(lines, ansi.Truncate(line, width, "…"))
 	}
 
-	body := styleTabOn.Render(title) + "\n\n" +
+	body := styleSource.Render(title) + "\n\n" +
 		m.progress.ViewAs(float64(done)/float64(max(len(m.jobs), 1))) + "\n\n" +
 		strings.Join(lines, "\n")
 	inner := m.h - stylePanel.GetVerticalFrameSize()

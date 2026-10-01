@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -28,22 +29,31 @@ func (d details) link() string {
 
 var httpClient = &http.Client{Timeout: 15 * time.Second}
 
-func getJSON(u string, v any) error {
+// get fetches u; anything but 200 OK is an error.
+func get(u string) (io.ReadCloser, error) {
 	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "bump (github.com/EnderWolf50/bump)") // crates.io requires one
 	res, err := httpClient.Do(req)
 	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		res.Body.Close()
+		return nil, fmt.Errorf("%s: %s", u, res.Status)
+	}
+	return res.Body, nil
+}
+
+func getJSON(u string, v any) error {
+	body, err := get(u)
+	if err != nil {
 		return err
 	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s: %s", u, res.Status)
-	}
-	return json.NewDecoder(res.Body).Decode(v)
+	defer body.Close()
+	return json.NewDecoder(body).Decode(v)
 }
 
 var wingetField = regexp.MustCompile(`(?m)^\s*(Release Date|Homepage|Release Notes Url):\s*(.+?)\s*$`)

@@ -7,9 +7,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -140,7 +138,6 @@ func goOutdatedFrom(latestOf func(module string) (string, error)) ([]pkg, error)
 				Module: b.module, Dir: filepath.Dir(b.file)})
 		}
 	}
-	sortByID(pkgs)
 	return pkgs, nil
 }
 
@@ -167,19 +164,18 @@ func goProxy(module, rest string) string {
 }
 
 func goVersions(p pkg) ([]release, error) {
-	res, err := httpClient.Get(goProxy(p.Module, "@v/list"))
+	body, err := get(goProxy(p.Module, "@v/list"))
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("go proxy: %s", res.Status)
-	}
-	// Every Go version starts with "v"; a prerelease is marked by "-" (v1.2.0-rc.1).
+	defer body.Close()
+	// Every Go version starts with "v", and a module from before modules with a major version
+	// past 1 ends in "+incompatible": neither makes it a prerelease.
 	var rs []release
-	sc := bufio.NewScanner(io.LimitReader(res.Body, 1<<20))
+	sc := bufio.NewScanner(io.LimitReader(body, 1<<20))
 	for sc.Scan() {
-		if v := strings.TrimSpace(sc.Text()); v != "" && !strings.Contains(v, "-") {
+		v := strings.TrimSpace(sc.Text())
+		if v != "" && !isPrerelease(strings.TrimSuffix(strings.TrimPrefix(v, "v"), "+incompatible")) {
 			rs = append(rs, release{Version: v})
 		}
 	}

@@ -92,16 +92,11 @@ type theme struct {
 var cfg config
 
 func init() {
-	cfg = mustParse(defaultConfig)
-	applyTheme(cfg.Theme)
-}
-
-func mustParse(text string) config {
-	c, err := parseConfig(config{}, text)
-	if err != nil {
+	var err error
+	if cfg, err = parseConfig(config{}, defaultConfig); err != nil {
 		panic("the default config is broken: " + err.Error())
 	}
-	return c
+	applyTheme(cfg.Theme)
 }
 
 // configPath is $BUMP_CONFIG, else bump/config.toml in $XDG_CONFIG_HOME or ~/.config.
@@ -157,13 +152,13 @@ func parseConfig(base config, text string) (config, error) {
 	}
 
 	for _, name := range c.Skip {
-		if sourceNamed(name).name == "" {
+		if _, ok := sourceNamed(name); !ok {
 			return base, fmt.Errorf("skip: no package manager called %q", name)
 		}
 	}
 	for _, entry := range c.Ignore {
 		name, id, ok := strings.Cut(entry, ":")
-		if !ok || id == "" || sourceNamed(name).name == "" {
+		if _, known := sourceNamed(name); !ok || id == "" || !known {
 			return base, fmt.Errorf("ignore: %q is not \"manager:id\"", entry)
 		}
 	}
@@ -216,9 +211,9 @@ var (
 	colorAccent, colorDim, colorFaint, colorOK, colorBad         color.Color
 	bgCursor, bgPicked, bgCursorPicked, bgChosen, bgCursorChosen color.Color
 
-	styleSource, styleOK, styleErr, styleDim, styleFaint, styleTabOn lipgloss.Style
-	stylePanel, styleModal, stylePicker                              lipgloss.Style
-	styleBump                                                        map[int]lipgloss.Style
+	styleSource, styleOK, styleErr, styleDim, styleFaint lipgloss.Style
+	stylePanel, styleModal, stylePicker                  lipgloss.Style
+	styleBump                                            map[int]lipgloss.Style
 )
 
 func applyTheme(t theme) {
@@ -229,7 +224,6 @@ func applyTheme(t theme) {
 
 	fg := func(col color.Color) lipgloss.Style { return lipgloss.NewStyle().Foreground(col) }
 	styleSource = fg(colorAccent).Bold(true)
-	styleTabOn = fg(colorAccent).Bold(true)
 	styleOK, styleErr, styleDim, styleFaint = fg(colorOK), fg(colorBad), fg(colorDim), fg(colorFaint)
 	// A version is colored by how far it jumps; see bump.
 	styleBump = map[int]lipgloss.Style{

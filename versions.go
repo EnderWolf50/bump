@@ -40,10 +40,15 @@ func newer(rs []release, current string) []release {
 // prerelease spots "1.2.0-beta.1" (semver) and "1.2.0rc1"/"2.0.dev3" (Python).
 var prerelease = regexp.MustCompile(`-|[a-zA-Z]`)
 
+// isPrerelease is the one rule for every registry: semver (npm, crates.io, NuGet, Go) puts
+// letters only after a "-" or "+", and Python marks prereleases with letters, so a stable
+// version is numbers and dots everywhere. winget is the exception and is not filtered.
+func isPrerelease(v string) bool { return prerelease.MatchString(v) }
+
 func stable(vs []string) []release {
 	var out []release
 	for _, v := range vs {
-		if !prerelease.MatchString(v) {
+		if !isPrerelease(v) {
 			out = append(out, release{Version: v})
 		}
 	}
@@ -87,7 +92,7 @@ func npmVersions(p pkg) ([]release, error) {
 	}
 	var rs []release
 	for v, t := range doc.Time {
-		if v != "created" && v != "modified" && !strings.Contains(v, "-") {
+		if !isPrerelease(v) { // also skips the "created" and "modified" keys
 			rs = append(rs, release{v, t})
 		}
 	}
@@ -105,7 +110,7 @@ func pypiVersions(p pkg) ([]release, error) {
 	}
 	var rs []release
 	for v, files := range doc.Releases {
-		if prerelease.MatchString(v) || len(files) == 0 {
+		if isPrerelease(v) || len(files) == 0 {
 			continue
 		}
 		rs = append(rs, release{v, files[0].Uploaded})
@@ -134,7 +139,7 @@ func cratesVersions(p pkg) ([]release, error) {
 	}
 	var rs []release
 	for _, v := range doc.Versions {
-		if !v.Yanked && !strings.Contains(v.Num, "-") {
+		if !v.Yanked && !isPrerelease(v.Num) {
 			rs = append(rs, release{v.Num, v.CreatedAt})
 		}
 	}

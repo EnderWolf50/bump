@@ -29,6 +29,15 @@ type pkg struct {
 	Cask bool // for brew only: a cask, not a formula
 }
 
+// key names a package across managers.
+func (p pkg) key() string { return p.Source + "/" + p.ID }
+
+// upgrade is the command that upgrades p to version, "" meaning the latest.
+func (p pkg) upgrade(version string) []string {
+	s, _ := sourceNamed(p.Source)
+	return s.upgrade(p, version)
+}
+
 // A source is one package manager: how to find what is outdated there, how to upgrade one of
 // its packages and, when it can, which versions exist and where a package's release date and
 // home page are.
@@ -132,16 +141,14 @@ var sources = []source{
 		outdated: goOutdated, fresh: goFresh, info: goInfo, versions: goVersions, upgrade: goInstall},
 }
 
-func sourceNamed(name string) source {
+func sourceNamed(name string) (source, bool) {
 	for _, s := range sources {
 		if s.name == name {
-			return s
+			return s, true
 		}
 	}
-	return source{}
+	return source{}, false
 }
-
-func upgradeCommand(p pkg) []string { return sourceNamed(p.Source).upgrade(p, "") }
 
 // supported says the package manager exists on this platform at all; the others are not
 // shown, rather than shown as not installed.
@@ -350,7 +357,6 @@ func parseBrew(out []byte) ([]pkg, error) {
 		pkgs = append(pkgs, pkg{Source: "brew", ID: c.Name, Current: installed(c.InstalledVersions),
 			Latest: c.CurrentVersion, Cask: true})
 	}
-	sortByID(pkgs)
 	return pkgs, nil
 }
 
@@ -391,7 +397,6 @@ func miseOutdatedWith(env ...string) ([]pkg, error) {
 		}
 		pkgs = append(pkgs, p)
 	}
-	sortByID(pkgs)
 	return pkgs, nil
 }
 
@@ -400,18 +405,7 @@ func npmOutdated() ([]pkg, error) {
 	if err != nil {
 		return nil, err
 	}
-	var m map[string]struct{ Current, Latest string }
-	if len(bytes.TrimSpace(out)) > 0 {
-		if err := json.Unmarshal(out, &m); err != nil {
-			return nil, fmt.Errorf("npm outdated: %w", err)
-		}
-	}
-	var pkgs []pkg
-	for id, v := range m {
-		pkgs = append(pkgs, pkg{Source: "npm", ID: id, Current: v.Current, Latest: v.Latest})
-	}
-	sortByID(pkgs)
-	return pkgs, nil
+	return parseNpmOutdated("npm", out)
 }
 
 func pnpmOutdated() ([]pkg, error) {
@@ -422,17 +416,22 @@ func pnpmOutdated() ([]pkg, error) {
 	if bytes.Contains(out, []byte("ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND")) {
 		return nil, nil // nothing installed globally yet
 	}
+	return parseNpmOutdated("pnpm", out)
+}
+
+// parseNpmOutdated reads the JSON npm and pnpm print for `outdated`: an object keyed by
+// package; nothing at all when nothing is outdated.
+func parseNpmOutdated(source string, out []byte) ([]pkg, error) {
 	var m map[string]struct{ Current, Latest string }
 	if len(bytes.TrimSpace(out)) > 0 {
 		if err := json.Unmarshal(out, &m); err != nil {
-			return nil, fmt.Errorf("pnpm outdated: %w", err)
+			return nil, fmt.Errorf("%s outdated: %w", source, err)
 		}
 	}
 	var pkgs []pkg
 	for id, v := range m {
-		pkgs = append(pkgs, pkg{Source: "pnpm", ID: id, Current: v.Current, Latest: v.Latest})
+		pkgs = append(pkgs, pkg{Source: source, ID: id, Current: v.Current, Latest: v.Latest})
 	}
-	sortByID(pkgs)
 	return pkgs, nil
 }
 

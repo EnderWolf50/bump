@@ -35,7 +35,7 @@ func fakeRun(ran *[]string, fail string) func(context.Context, []job, chan<- tea
 	return func(_ context.Context, jobs []job, ch chan<- tea.Msg) {
 		defer close(ch)
 		for i, j := range jobs {
-			*ran = append(*ran, strings.Join(j.command(), " "))
+			*ran = append(*ran, strings.Join(j.upgrade(j.target), " "))
 			ch <- jobStartMsg{i}
 			ch <- jobLineMsg{i, "working on " + j.ID}
 			var err error
@@ -178,7 +178,7 @@ func TestVersionPicker(t *testing.T) {
 	if m.picker != nil || !m.rows[0].picked || m.rows[0].target != "1.5.0" {
 		t.Fatalf("after choosing: picker open %v, row %+v", m.picker != nil, m.rows[0])
 	}
-	if got := strings.Join(jobFor(m.rows[0]).command(), " "); !strings.Contains(got, "--version 1.5.0") {
+	if got := strings.Join(m.rows[0].upgrade(m.rows[0].target), " "); !strings.Contains(got, "--version 1.5.0") {
 		t.Fatalf("command %q does not ask for 1.5.0", got)
 	}
 	// A row picked at a version below the latest gets the amber tint (brighter: the cursor is on it).
@@ -199,8 +199,6 @@ func TestVersionPicker(t *testing.T) {
 		t.Fatalf("scoop opened a picker (status %q)", m.status)
 	}
 }
-
-func jobFor(r *row) job { return job{pkg: r.pkg, target: r.target} }
 
 func TestRefreshKeepsChoices(t *testing.T) {
 	m := newModel([]source{{name: "winget"}})

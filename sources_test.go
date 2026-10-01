@@ -145,15 +145,15 @@ func TestParseBrew(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []pkg{
-		{Source: "brew", ID: "firefox", Current: "140.0", Latest: "141.0", Cask: true},
-		{Source: "brew", ID: "go", Current: "1.26.0", Latest: "1.27.1", Pin: "brew unpin go"},
-		{Source: "brew", ID: "iterm2", Current: "3.5.0", Latest: "3.5.1", Cask: true},
 		{Source: "brew", ID: "node", Current: "24.0.1", Latest: "24.1.0"},
+		{Source: "brew", ID: "go", Current: "1.26.0", Latest: "1.27.1", Pin: "brew unpin go"},
+		{Source: "brew", ID: "firefox", Current: "140.0", Latest: "141.0", Cask: true},
+		{Source: "brew", ID: "iterm2", Current: "3.5.0", Latest: "3.5.1", Cask: true},
 	}
 	if fmt.Sprint(pkgs) != fmt.Sprint(want) {
 		t.Errorf("got %+v", pkgs)
 	}
-	if got := sourceNamed("brew").upgrade(pkgs[0], ""); strings.Join(got, " ") != "brew upgrade --cask firefox" {
+	if got := pkgs[2].upgrade(""); strings.Join(got, " ") != "brew upgrade --cask firefox" {
 		t.Errorf("cask upgrade = %q", got)
 	}
 }
@@ -174,5 +174,28 @@ func TestSupported(t *testing.T) {
 	}
 	if (source{platforms: []string{"plan9-only"}}).supported() {
 		t.Error("a manager for another platform counts as supported")
+	}
+}
+
+func TestParseNpmOutdated(t *testing.T) {
+	for _, c := range []struct {
+		out  string
+		want string
+	}{
+		{`{"typescript":{"current":"5.0.0","wanted":"5.0.0","latest":"5.6.2"}}`, "[{pnpm typescript 5.0.0 5.6.2}]"},
+		{"", "[]"},
+		{"  \n", "[]"},
+	} {
+		got, err := parseNpmOutdated("pnpm", []byte(c.out))
+		var short []string
+		for _, p := range got {
+			short = append(short, fmt.Sprintf("{%s %s %s %s}", p.Source, p.ID, p.Current, p.Latest))
+		}
+		if err != nil || fmt.Sprint(short) != c.want {
+			t.Errorf("parseNpmOutdated(%q) = %v, %v; want %s", c.out, short, err, c.want)
+		}
+	}
+	if _, err := parseNpmOutdated("npm", []byte("npm ERR!")); err == nil || !strings.HasPrefix(err.Error(), "npm outdated") {
+		t.Errorf("bad JSON: error %v", err)
 	}
 }

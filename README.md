@@ -29,7 +29,7 @@ bump npm mise        limit to some managers (works with -l and -y too)
 ```
 
 In the picker the sidebar lists the managers (`?` not installed, `!` check failed) and the
-table the outdated packages of the one selected:
+table the outdated packages of the one selected, by name:
 
 | Key | In the table |
 | --- | --- |

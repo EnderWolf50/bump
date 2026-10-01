@@ -21,9 +21,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// sideWidth is the sidebar's width, from the settings.
-func sideWidth() int { return cfg.SidebarWidth }
-
 // Lines of the right panel around the table: heading and filter above; a blank, the
 // divider and two detail lines below. The help takes as many more as it needs.
 const tableChrome = 6
@@ -56,22 +53,25 @@ func columns(width int) []table.Column {
 // with the table.
 func idWidth(width int) int { return columns(width)[2].Width - 2 }
 
-// row is one outdated package and whether to upgrade it; a pointer, so the choice survives
-// switching and filtering.
-type row struct {
+// choice is a package and the version to upgrade it to.
+type choice struct {
 	pkg
-	picked bool
 	target string // a version chosen in the version picker; "" means the latest
 }
 
-func (r *row) key() string { return r.Source + "/" + r.ID }
-
 // to is the version an upgrade goes to.
-func (r *row) to() string {
-	if r.target != "" {
-		return r.target
+func (c choice) to() string {
+	if c.target != "" {
+		return c.target
 	}
-	return r.Latest
+	return c.Latest
+}
+
+// row is one outdated package and whether to upgrade it; a pointer, so the choice survives
+// switching and filtering.
+type row struct {
+	choice
+	picked bool
 }
 
 // loadedMsg is one package manager's answer, arriving whenever it is ready.
@@ -191,7 +191,7 @@ func (m *model) check(name string, fresh bool) tea.Cmd {
 			continue
 		}
 		m.tabs[i+1].loading = true
-		s := sourceNamed(t.name)
+		s, _ := sourceNamed(t.name)
 		cmds = append(cmds, func() tea.Msg {
 			pkgs, err := ask(s, fresh)
 			return loadedMsg{s.name, pkgs, err}
@@ -317,7 +317,7 @@ func (m *model) lookUp() tea.Cmd {
 	if !ok || m.infos[r.key()] != nil {
 		return nil
 	}
-	s := sourceNamed(r.Source)
+	s, _ := sourceNamed(r.Source)
 	if s.info == nil {
 		m.infos[r.key()] = &info{}
 		return nil
@@ -335,7 +335,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		frameW, frameH := stylePanel.GetFrameSize()
-		width := m.w - sideWidth() - frameW
+		width := m.w - cfg.SidebarWidth - frameW
 		m.table.SetColumns(columns(width))
 		m.table.SetWidth(width)
 		m.helpRows = len(helpLines(m.help, width, m.helpGroups()...))
@@ -369,7 +369,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			byName[r.Source] = append(byName[r.Source], r)
 		}
 		for _, p := range msg.pkgs {
-			r := &row{pkg: p}
+			r := &row{choice: choice{pkg: p}}
 			if old := was[p.ID]; old != nil {
 				r.picked, r.target = old.picked && p.Pin == "", old.target
 			}
@@ -595,7 +595,7 @@ func (m model) viewPick() string {
 		label := fmt.Sprintf("%-10s %s", t.name, lipgloss.PlaceHorizontal(13, lipgloss.Right, count))
 		switch {
 		case i == m.on:
-			side = append(side, styleTabOn.Render("▌ "+label))
+			side = append(side, styleSource.Render("▌ "+label))
 		case t.missing():
 			side = append(side, styleFaint.Render("  "+label))
 		default:
@@ -618,8 +618,8 @@ func (m model) viewPick() string {
 	side = append(side, strings.Repeat("\n", max(inner-len(side)-len(foot)-1, 0)))
 	side = append(side, styleDim.Render(strings.Join(foot, "\n")))
 	return lipgloss.JoinHorizontal(lipgloss.Top,
-		sideStyle.Width(sideWidth()).Height(m.h).Render(strings.Join(side, "\n")),
-		listStyle.Width(m.w-sideWidth()).Height(m.h).Render(m.viewList()))
+		sideStyle.Width(cfg.SidebarWidth).Height(m.h).Render(strings.Join(side, "\n")),
+		listStyle.Width(m.w-cfg.SidebarWidth).Height(m.h).Render(m.viewList()))
 }
 
 // viewList is the right panel: heading, filter, the table, what is known about the package
@@ -627,8 +627,8 @@ func (m model) viewPick() string {
 func (m model) viewList() string {
 	t := m.tabs[m.on]
 	// Never below zero, even in a terminal narrower than the sidebar.
-	width := max(m.w-sideWidth()-stylePanel.GetHorizontalFrameSize(), 0)
-	heading := styleTabOn.Render(t.name)
+	width := max(m.w-cfg.SidebarWidth-stylePanel.GetHorizontalFrameSize(), 0)
+	heading := styleSource.Render(t.name)
 	switch {
 	case t.loading:
 		heading += styleDim.Render(" · checking " + m.spinner.View())
