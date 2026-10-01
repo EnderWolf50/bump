@@ -30,7 +30,7 @@ type versionsMsg struct {
 type pickItem struct {
 	label string
 	release
-	level int
+	level jump
 }
 
 func (it pickItem) FilterValue() string { return it.Version + " " + it.label }
@@ -200,8 +200,8 @@ func (m model) updateQuit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // ---- the review --------------------------------------------------------------------------
 
-// chosen is what saving will upgrade, in list order.
-func (m model) chosen() []job {
+// queued is what saving will upgrade, in list order.
+func (m model) queued() []job {
 	var jobs []job
 	for _, r := range m.rows {
 		if r.picked {
@@ -212,7 +212,7 @@ func (m model) chosen() []job {
 }
 
 func (m model) startReview() (tea.Model, tea.Cmd) {
-	jobs := m.chosen()
+	jobs := m.queued()
 	if len(jobs) == 0 {
 		m.status = "nothing picked yet: space picks a package"
 		return m, nil
@@ -236,7 +236,7 @@ func (m model) startReview() (tea.Model, tea.Cmd) {
 		lines = append(lines, "", styleBump[bumpMajor].Render(fmt.Sprintf("%d major update%s: check their release notes for breaking changes.",
 			majors, map[bool]string{true: "", false: "s"}[majors == 1])))
 	}
-	m.reviewing = true
+	m.screen = screenReview
 	m.review.SetContentLines(lines)
 	m.review.GotoTop()
 	return m, nil
@@ -248,7 +248,7 @@ func (m model) updateReview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keyReviewStart):
 		return m.start()
 	case key.Matches(msg, keyReviewBack):
-		m.reviewing = false
+		m.screen = screenTable
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -257,7 +257,7 @@ func (m model) updateReview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) viewReview() string {
-	title := styleSource.Render("Review") + styleDim.Render(fmt.Sprintf(" · %d to upgrade", len(m.chosen())))
+	title := styleSource.Render("Review") + styleDim.Render(fmt.Sprintf(" · %d to upgrade", len(m.queued())))
 	help := m.help.ShortHelpView([]key.Binding{keyReviewStart, keyReviewBack, keyScroll})
 	return stylePanel.BorderForeground(colorAccent).Width(m.w).Height(m.h).Render(
 		title + "\n\n" + m.review.View() + "\n" + help)
@@ -281,8 +281,7 @@ const (
 
 // start runs what the review listed and switches to the progress screen.
 func (m model) start() (tea.Model, tea.Cmd) {
-	m.reviewing = false
-	m.jobs = m.chosen()
+	m.screen, m.jobs = screenRun, m.queued()
 	var ctx context.Context
 	ctx, m.cancel = context.WithCancel(context.Background())
 	m.ch = make(chan tea.Msg)
@@ -333,7 +332,7 @@ func (m model) updateJobs(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				rows = append(rows, r)
 			}
 		}
-		m.rows, m.jobs = rows, nil
+		m.rows, m.jobs, m.screen = rows, nil, screenTable
 		return m, m.refresh()
 	}
 	return m, nil

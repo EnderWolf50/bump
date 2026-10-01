@@ -33,7 +33,7 @@ func TestParseWinget(t *testing.T) {
 func TestBump(t *testing.T) {
 	for _, c := range []struct {
 		cur, latest string
-		want        int
+		want        jump
 	}{
 		{"26.9.0", "26.10.0", bumpMinor},
 		{"2.55.0.3", "2.55.0.5", bumpPatch},

@@ -25,8 +25,6 @@ import (
 // divider and two detail lines below. The help takes as many more as it needs.
 const tableChrome = 6
 
-var bumpName = map[int]string{bumpMajor: "major", bumpMinor: "minor", bumpPatch: "patch", bumpOther: "?"}
-
 // columns fits the table to the panel: the package id takes what the fixed columns leave,
 // up to 40 cells. The widths include a cell of padding on each side, which redraw paints
 // itself so a row's background runs unbroken (the table's own padding would stay unpainted).
@@ -100,21 +98,21 @@ type infoMsg struct {
 	err error
 }
 
-type info struct {
+// lookup is what is known of one package's details: still loading, found, or failed.
+type lookup struct {
 	d       details
 	err     error
 	loading bool
 }
 
-var (
-	keyPick     = key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "upgrade"))
-	keyVersions = key.NewBinding(key.WithKeys("enter", "v"), key.WithHelp("enter/v", "version"))
-	keyAll      = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "upgrade all shown"))
-	keyFilter   = key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter"))
-	keyOpen     = key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open page"))
-	keySave     = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save"))
-	keyBack     = key.NewBinding(key.WithKeys("left", "h", "esc", "q"), key.WithHelp("←/h/esc/q", "back"))
-	keyRefresh  = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh"))
+// screen is what fills the terminal: the table, the review of what saving will do, or the
+// progress of the run.
+type screen int
+
+const (
+	screenTable screen = iota
+	screenReview
+	screenRun
 )
 
 type model struct {
@@ -129,16 +127,17 @@ type model struct {
 	helpRows int // lines the help takes at this width
 	spinner  spinner.Model
 	started  time.Time
-	infos    map[string]*info
+	infos    map[string]*lookup
 	w, h     int    // terminal size
 	status   string // a one-off note next to the heading, cleared by the next key
 
-	// At most one of these is open, over or instead of the picking screen.
-	confirmQuit bool           // the quit dialog
-	picker      *picker        // the version picker
-	reviewing   bool           // the list of what saving will do, before it starts
-	review      viewport.Model //
-	jobs        []job          // the progress screen, from the start of the run
+	screen screen
+	review viewport.Model // the review's lines
+	jobs   []job          // the run's upgrades, from its start
+
+	// At most one box is open over the table: the quit question or the version picker.
+	confirmQuit bool
+	picker      *picker
 
 	running  bool
 	ch       chan tea.Msg
@@ -157,7 +156,7 @@ func newModel(srcs []source) model {
 		progress: progress.New(progress.WithColors(colorAccent, colorOK)),
 		runJobs:  runJobs,
 		started:  time.Now(),
-		infos:    map[string]*info{},
+		infos:    map[string]*lookup{},
 	}
 	for _, s := range srcs {
 		m.tabs = append(m.tabs, tabState{name: s.name, loading: true})
@@ -319,10 +318,10 @@ func (m *model) lookUp() tea.Cmd {
 	}
 	s, _ := sourceNamed(r.Source)
 	if s.info == nil {
-		m.infos[r.key()] = &info{}
+		m.infos[r.key()] = &lookup{}
 		return nil
 	}
-	m.infos[r.key()] = &info{loading: true}
+	m.infos[r.key()] = &lookup{loading: true}
 	k, p := r.key(), r.pkg
 	return func() tea.Msg {
 		d, err := s.info(p)
@@ -384,7 +383,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.refresh()
 	case infoMsg:
-		m.infos[msg.key] = &info{d: msg.d, err: msg.err}
+		m.infos[msg.key] = &lookup{d: msg.d, err: msg.err}
 		return m, nil
 	case versionsMsg:
 		if m.picker != nil && m.picker.row.key() == msg.key {
@@ -406,9 +405,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateQuit(msg)
 		case m.picker != nil:
 			return m.updatePicker(msg)
-		case m.jobs != nil:
+		case m.screen == screenRun:
 			return m.updateJobs(msg)
-		case m.reviewing:
+		case m.screen == screenReview:
 			return m.updateReview(msg)
 		case m.filter.Focused():
 			return m.updateFilter(msg)
@@ -541,10 +540,10 @@ func (m model) View() tea.View {
 	if m.w == 0 { // the first frame comes before the terminal's size is known
 		return v
 	}
-	switch {
-	case m.jobs != nil:
+	switch m.screen {
+	case screenRun:
 		v.Content = m.viewJobs()
-	case m.reviewing:
+	case screenReview:
 		v.Content = m.viewReview()
 	default:
 		v.Content = m.viewPick()
@@ -654,7 +653,7 @@ func (m model) viewList() string {
 	if r, ok := m.current(); ok {
 		in := m.infos[r.key()]
 		if in == nil {
-			in = &info{}
+			in = &lookup{}
 		}
 		detail[0] = styleSource.Render(r.ID) + styleDim.Render(" · from "+r.Source)
 		if link := in.d.link(); link != "" {

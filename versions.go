@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -12,6 +13,44 @@ import (
 type release struct {
 	Version string
 	Date    time.Time
+}
+
+// jump is how far a new version is from the current one: which part of it changes first.
+type jump int
+
+const (
+	bumpOther jump = iota // not comparable, e.g. "Unknown"
+	bumpMajor
+	bumpMinor
+	bumpPatch // or anything past the third number
+)
+
+var bumpName = map[jump]string{bumpMajor: "major", bumpMinor: "minor", bumpPatch: "patch", bumpOther: "?"}
+
+var versionNumber = regexp.MustCompile(`\d+`)
+
+// bump says which part of the version changes first, reading the numbers in order:
+// "1.4.2" -> "1.5.0" is minor. Text around them ("< ", "-nightly", "b") is ignored.
+func bump(cur, latest string) jump {
+	a, b := versionNumber.FindAllString(cur, -1), versionNumber.FindAllString(latest, -1)
+	if len(a) == 0 || len(b) == 0 {
+		return bumpOther
+	}
+	for i := range max(len(a), len(b)) {
+		if part(a, i) != part(b, i) {
+			return min(jump(i+1), bumpPatch)
+		}
+	}
+	return bumpPatch // same numbers, different suffix: 1.2.3b -> 1.2.3c
+}
+
+// part is the i-th number of a version, 0 past its end: "1" reads as 1.0.0.
+func part(nums []string, i int) int {
+	if i >= len(nums) {
+		return 0
+	}
+	n, _ := strconv.Atoi(nums[i])
+	return n
 }
 
 // compareVersions orders versions by their numbers ("1.10" after "1.9"), then as text.
@@ -148,8 +187,8 @@ func cratesVersions(p pkg) ([]release, error) {
 
 // shortcuts are the newest patch, minor and major release among rs (newest first), each
 // only when it exists: what the version picker offers above the full list.
-func shortcuts(rs []release, current string) map[int]release {
-	out := map[int]release{}
+func shortcuts(rs []release, current string) map[jump]release {
+	out := map[jump]release{}
 	for _, r := range rs {
 		level := bump(current, r.Version)
 		if _, seen := out[level]; !seen && level != bumpOther {

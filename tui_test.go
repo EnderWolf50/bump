@@ -97,7 +97,7 @@ func TestModel(t *testing.T) {
 		t.Fatal("q with a package chosen did not ask first")
 	}
 	for _, k := range []string{"j", "s", "enter", "space"} { // only the question's keys count
-		if m, _ = press(m, k); !m.confirmQuit || m.reviewing {
+		if m, _ = press(m, k); !m.confirmQuit || m.screen != screenTable {
 			t.Fatalf("%q acted behind the quit dialog", k)
 		}
 	}
@@ -129,16 +129,16 @@ func TestModel(t *testing.T) {
 	var ran []string
 	m.runJobs = fakeRun(&ran, "7zip")
 	m, _ = press(m, "s")
-	if !m.reviewing || m.jobs != nil {
+	if m.screen != screenReview {
 		t.Fatal("save did not stop at the review")
 	}
 	m, _ = press(m, "esc")
-	if m.reviewing {
+	if m.screen != screenTable {
 		t.Fatal("esc did not leave the review")
 	}
 	m, _ = press(m, "s")
 	m, _ = press(m, "enter")
-	if m.jobs == nil {
+	if m.screen != screenRun {
 		t.Fatal("enter in the review did not start the run")
 	}
 	m = finish(m)
@@ -152,7 +152,7 @@ func TestModel(t *testing.T) {
 
 	// Back to the table: what succeeded is gone, the failure stays, unchosen.
 	m, _ = press(m, "esc")
-	if m.jobs != nil || len(m.rows) != 2 || m.rows[0].ID != "pinned" || m.rows[1].ID != "7zip" || m.rows[1].picked {
+	if m.screen != screenTable || len(m.rows) != 2 || m.rows[0].ID != "pinned" || m.rows[1].ID != "7zip" || m.rows[1].picked {
 		t.Fatalf("after the run the table holds %+v", m.rows)
 	}
 }

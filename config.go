@@ -213,7 +213,7 @@ var (
 
 	styleSource, styleOK, styleErr, styleDim, styleFaint lipgloss.Style
 	stylePanel, styleModal, stylePicker                  lipgloss.Style
-	styleBump                                            map[int]lipgloss.Style
+	styleBump                                            map[jump]lipgloss.Style
 )
 
 func applyTheme(t theme) {
@@ -226,7 +226,7 @@ func applyTheme(t theme) {
 	styleSource = fg(colorAccent).Bold(true)
 	styleOK, styleErr, styleDim, styleFaint = fg(colorOK), fg(colorBad), fg(colorDim), fg(colorFaint)
 	// A version is colored by how far it jumps; see bump.
-	styleBump = map[int]lipgloss.Style{
+	styleBump = map[jump]lipgloss.Style{
 		bumpMajor: fg(c(t.Major)), bumpMinor: fg(c(t.Minor)), bumpPatch: fg(c(t.Patch)), bumpOther: fg(c(t.Other)),
 	}
 	border := lipgloss.NewStyle().Border(lipgloss.RoundedBorder())

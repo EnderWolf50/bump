@@ -2,10 +2,19 @@ package main
 
 import "charm.land/bubbles/v2/key"
 
-// The keys of the sidebar, the filter, the version picker, the quit question, the review and
-// the progress screen. The table's own are in tui.go, beside its help.
+// The keys of every screen; help.go lays out the table's help.
 var (
 	keyForceQuit = key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "abort"))
+
+	// The table (its cursor keys are the table's own).
+	keyPick     = key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "upgrade"))
+	keyVersions = key.NewBinding(key.WithKeys("enter", "v"), key.WithHelp("enter/v", "version"))
+	keyAll      = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "upgrade all shown"))
+	keyFilter   = key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter"))
+	keyOpen     = key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open page"))
+	keySave     = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save"))
+	keyBack     = key.NewBinding(key.WithKeys("left", "h", "esc", "q"), key.WithHelp("←/h/esc/q", "back"))
+	keyRefresh  = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh"))
 
 	// The sidebar.
 	keySideUp   = key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up"))

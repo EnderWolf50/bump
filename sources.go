@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -593,39 +592,6 @@ func cargoOutdated() ([]pkg, error) {
 
 func sortByID(pkgs []pkg) {
 	sort.Slice(pkgs, func(i, j int) bool { return pkgs[i].ID < pkgs[j].ID })
-}
-
-const (
-	bumpOther = iota // not comparable, e.g. "Unknown"
-	bumpMajor
-	bumpMinor
-	bumpPatch // or anything past the third number
-)
-
-var versionNumber = regexp.MustCompile(`\d+`)
-
-// bump says which part of the version changes first, reading the numbers in order:
-// "1.4.2" -> "1.5.0" is minor. Text around them ("< ", "-nightly", "b") is ignored.
-func bump(cur, latest string) int {
-	a, b := versionNumber.FindAllString(cur, -1), versionNumber.FindAllString(latest, -1)
-	if len(a) == 0 || len(b) == 0 {
-		return bumpOther
-	}
-	for i := range max(len(a), len(b)) {
-		if part(a, i) != part(b, i) {
-			return min(i+1, bumpPatch)
-		}
-	}
-	return bumpPatch // same numbers, different suffix: 1.2.3b -> 1.2.3c
-}
-
-// part is the i-th number of a version, 0 past its end: "1" reads as 1.0.0.
-func part(nums []string, i int) int {
-	if i >= len(nums) {
-		return 0
-	}
-	n, _ := strconv.Atoi(nums[i])
-	return n
 }
 
 // fit pads s to n cells, or cuts it with "…" when longer.
