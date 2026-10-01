@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -197,5 +198,18 @@ func TestParseNpmOutdated(t *testing.T) {
 	}
 	if _, err := parseNpmOutdated("npm", []byte("npm ERR!")); err == nil || !strings.HasPrefix(err.Error(), "npm outdated") {
 		t.Errorf("bad JSON: error %v", err)
+	}
+}
+
+func TestElevateOnlyWhenAdminIsMissing(t *testing.T) {
+	if !needsAdmin("Installer failed with exit code: 0x80073d28 : The package installation failed because administrator privileges are required.") {
+		t.Error("winget's admin failure not recognised")
+	}
+	if needsAdmin("A newer package version is available in a configured source, but it does not apply to your system or requirements.") {
+		t.Error("an unrelated failure taken for an admin one")
+	}
+	up := strings.Join(elevated([]string{"winget", "upgrade", "--id", "Microsoft.WSL", "--exact"}), " ")
+	if runtime.GOOS == "windows" && !strings.Contains(up, "Microsoft.WSL") {
+		t.Errorf("elevated = %q", up)
 	}
 }

@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"slices"
@@ -203,10 +204,12 @@ func upgrade(pkgs []pkg) {
 			continue
 		}
 		args := p.upgrade("")
-		fmt.Printf("\n\x1b[1m> %s\x1b[0m\n", strings.Join(args, " "))
-		c := command(context.Background(), args)
-		c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
-		if err := c.Run(); err != nil {
+		out, err := runForeground(args)
+		if up := elevated(args); err != nil && up != nil && needsAdmin(out) {
+			args = up
+			_, err = runForeground(args)
+		}
+		if err != nil {
 			failed = append(failed, strings.Join(args, " "))
 		}
 	}
@@ -217,4 +220,14 @@ func upgrade(pkgs []pkg) {
 		}
 		os.Exit(1)
 	}
+}
+
+// runForeground runs args on this terminal and returns what it printed as well.
+func runForeground(args []string) (string, error) {
+	fmt.Printf("\n\x1b[1m> %s\x1b[0m\n", strings.Join(args, " "))
+	var out strings.Builder
+	c := command(context.Background(), args)
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, io.MultiWriter(os.Stdout, &out), io.MultiWriter(os.Stderr, &out)
+	err := c.Run()
+	return out.String(), err
 }

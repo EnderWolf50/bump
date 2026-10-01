@@ -62,6 +62,11 @@ Pinned packages (winget pins, scoop holds, brew pins, versions fixed in mise's c
 listed but never upgraded; bump shows how to unpin them. Scoop and brew can only install the
 latest version.
 
+A winget upgrade that fails only for want of administrator rights (a machine-wide MSIX such
+as Microsoft.WSL) is run again as administrator: through `gsudo` when it is on your `PATH`,
+keeping the output in bump, otherwise through a UAC prompt with the upgrade in a window of
+its own.
+
 ## Settings
 
 `~/.config/bump/config.toml`, or the file named by `$BUMP_CONFIG`. Start from the defaults:

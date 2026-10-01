@@ -221,3 +221,27 @@ func fit(s string, n int) string {
 	s = ansi.Truncate(s, n, "…")
 	return s + strings.Repeat(" ", max(n-ansi.StringWidth(s), 0))
 }
+
+// needsAdmin tells from an upgrade's output that it failed only for want of administrator
+// rights, as winget does for a machine-wide MSIX package (Microsoft.WSL).
+func needsAdmin(out string) bool {
+	return strings.Contains(out, "0x80073d28") || strings.Contains(out, "administrator privileges are required")
+}
+
+// elevated is args run as administrator, nil where bump cannot ask for that. gsudo keeps the
+// output here; without it, Windows asks through UAC and runs it in a window of its own.
+func elevated(args []string) []string {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	if _, err := exec.LookPath("gsudo"); err == nil {
+		return append([]string{"gsudo"}, args...)
+	}
+	quoted := make([]string, len(args)-1)
+	for i, a := range args[1:] {
+		quoted[i] = "'" + strings.ReplaceAll(a, "'", "''") + "'"
+	}
+	return []string{"powershell", "-NoProfile", "-Command", fmt.Sprintf(
+		"exit (Start-Process '%s' -ArgumentList %s -Verb RunAs -Wait -PassThru).ExitCode",
+		args[0], strings.Join(quoted, ","))}
+}

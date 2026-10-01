@@ -35,28 +35,39 @@ func runJobs(ctx context.Context, jobs []job, ch chan<- tea.Msg) {
 		}
 		ch <- jobStartMsg{i}
 		args := j.upgrade(j.target)
-		c := command(ctx, args)
-		pr, pw := io.Pipe()
-		c.Stdout, c.Stderr = pw, pw
-		if err := c.Start(); err != nil {
-			ch <- jobDoneMsg{i, err}
-			continue
+		out, err := runJob(ctx, i, args, ch)
+		if up := elevated(args); err != nil && up != nil && needsAdmin(out) {
+			ch <- jobLineMsg{i, "needs administrator rights, asking for them: " + strings.Join(up, " ")}
+			_, err = runJob(ctx, i, up, ch)
 		}
-		done := make(chan error, 1)
-		go func() {
-			done <- c.Wait()
-			pw.Close()
-		}()
-		sc := bufio.NewScanner(pr)
-		sc.Buffer(nil, 1<<20)
-		sc.Split(scanLines)
-		for sc.Scan() {
-			if t := strings.TrimSpace(ansi.Strip(sc.Text())); t != "" {
-				ch <- jobLineMsg{i, t}
-			}
-		}
-		ch <- jobDoneMsg{i, <-done}
+		ch <- jobDoneMsg{i, err}
 	}
+}
+
+// runJob runs one command, reports each line of its output and returns all of it.
+func runJob(ctx context.Context, i int, args []string, ch chan<- tea.Msg) (string, error) {
+	c := command(ctx, args)
+	pr, pw := io.Pipe()
+	c.Stdout, c.Stderr = pw, pw
+	if err := c.Start(); err != nil {
+		return "", err
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Wait()
+		pw.Close()
+	}()
+	var out strings.Builder
+	sc := bufio.NewScanner(pr)
+	sc.Buffer(nil, 1<<20)
+	sc.Split(scanLines)
+	for sc.Scan() {
+		if t := strings.TrimSpace(ansi.Strip(sc.Text())); t != "" {
+			out.WriteString(t + "\n")
+			ch <- jobLineMsg{i, t}
+		}
+	}
+	return out.String(), <-done
 }
 
 // scanLines splits at \r as well as \n: progress bars redraw themselves with \r.
