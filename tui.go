@@ -180,10 +180,11 @@ func newModel(srcs []source) model {
 	return m
 }
 
-func (m model) Init() tea.Cmd { return m.check("all") }
+func (m model) Init() tea.Cmd { return m.check("all", false) }
 
 // check asks one package manager, or all of them, again; loadedMsg brings each answer.
-func (m *model) check(name string) tea.Cmd {
+// check asks the manager named name (or "all") what is outdated; fresh asks past its caches.
+func (m *model) check(name string, fresh bool) tea.Cmd {
 	cmds := []tea.Cmd{m.spinner.Tick}
 	for i, t := range m.tabs[1:] {
 		if name != "all" && t.name != name {
@@ -192,7 +193,7 @@ func (m *model) check(name string) tea.Cmd {
 		m.tabs[i+1].loading = true
 		s := sourceNamed(t.name)
 		cmds = append(cmds, func() tea.Msg {
-			pkgs, err := ask(s)
+			pkgs, err := ask(s, fresh)
 			return loadedMsg{s.name, pkgs, err}
 		})
 	}
@@ -394,7 +395,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateRun(msg)
 	case tea.KeyPressMsg:
 		m.status = ""
-		if msg.String() == "ctrl+c" {
+		if key.Matches(msg, keyForceQuit) {
 			if m.cancel != nil {
 				m.cancel()
 			}
@@ -424,31 +425,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // The sidebar picks a manager; enter hands the keys to its table.
 func (m model) updateSide(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "q", "esc":
+	switch {
+	case key.Matches(msg, keySideQuit):
 		// Quitting drops the picks, so with some made it asks first.
 		if m.picked("all") > 0 {
 			m.confirmQuit = true
 			return m, nil
 		}
 		return m, tea.Quit
-	case "s":
+	case key.Matches(msg, keySave):
 		return m.startReview()
-	case "R":
-		return m, m.check(m.tabs[m.on].name)
-	case "up", "k":
+	case key.Matches(msg, keyRefresh):
+		return m, m.check(m.tabs[m.on].name, true)
+	case key.Matches(msg, keySideUp):
 		if m.on > 0 {
 			m.on--
 			m.table.SetCursor(0)
 			return m, m.refresh()
 		}
-	case "down", "j":
+	case key.Matches(msg, keySideDown):
 		if m.on < len(m.tabs)-1 {
 			m.on++
 			m.table.SetCursor(0)
 			return m, m.refresh()
 		}
-	case "enter", "right", "l":
+	case key.Matches(msg, keySideOpen):
 		m.inList = true
 		m.redraw()
 	}
@@ -457,11 +458,11 @@ func (m model) updateSide(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // Typing a filter: the table narrows as you type; enter keeps it, esc drops it.
 func (m model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "enter":
+	switch {
+	case key.Matches(msg, keyFilterKeep):
 		m.filter.Blur()
 		return m, nil
-	case "esc":
+	case key.Matches(msg, keyFilterClear):
 		m.filter.Blur()
 		m.filter.SetValue("")
 		return m, m.refresh()
@@ -487,7 +488,7 @@ func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keySave):
 		return m.startReview()
 	case key.Matches(msg, keyRefresh):
-		return m, m.check(m.tabs[m.on].name)
+		return m, m.check(m.tabs[m.on].name, true)
 	case key.Matches(msg, keyFilter):
 		return m, m.filter.Focus()
 	case key.Matches(msg, keyOpen):
@@ -610,7 +611,8 @@ func (m model) viewPick() string {
 	// bottom. (The filler string adds one line more than its newlines.)
 	foot := []string{"checked " + m.lastChecked().Format("15:04")}
 	if !m.inList {
-		foot = append(foot, "", "↑/k      up", "↓/j      down", "→/enter  open", "R        refresh", "s        save", "esc/q    quit")
+		keys := m.help.FullHelpView([][]key.Binding{{keySideUp, keySideDown, keySideOpen, keyRefresh, keySave, keySideQuit}})
+		foot = append(append(foot, ""), strings.Split(keys, "\n")...)
 	}
 	inner := m.h - sideStyle.GetVerticalFrameSize()
 	side = append(side, strings.Repeat("\n", max(inner-len(side)-len(foot)-1, 0)))
@@ -704,10 +706,7 @@ func (m model) viewList() string {
 	// While the filter is typed its own keys take the help's lines.
 	help := helpLines(m.help, width, m.helpGroups()...)
 	if m.filter.Focused() {
-		help = helpLines(m.help, width, []key.Binding{
-			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "keep filter")),
-			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter")),
-		})
+		help = helpLines(m.help, width, []key.Binding{keyFilterKeep, keyFilterClear})
 	}
 	for len(help) < m.helpRows {
 		help = append(help, "")

@@ -38,7 +38,7 @@ table the outdated packages of the one selected:
 | `a` | pick everything shown |
 | `/` | filter by name or manager |
 | `o` | open the package's release notes or home page |
-| `R` | check the selected manager again |
+| `R` | check the selected manager again, past the caches (see below) |
 | `s` | save: review the upgrades, then run them |
 | `←` `h` `esc` `q` | back to the sidebar |
 
@@ -46,7 +46,14 @@ The go manager covers programs installed with `go install`: bump reads which mod
 version each binary in GOBIN, GOPATH's bin and ~/.local/bin was built from, asks the Go
 module proxy for newer versions, and installs the new one into the same folder. Binaries
 built from a checkout (`go build`) have no released version to compare, so they are left
-out. A release can take a few minutes to show, while the proxy's cache catches up.
+out. On the first check a release can take a few minutes to show, while the proxy's cache
+catches up; `R` asks each module's repository instead.
+
+The first check is quick and may answer from caches; `R` asks again past them, where a
+manager keeps one: winget updates its sources first (`winget source update`), mise skips
+its cache of each tool's versions (`MISE_FETCH_REMOTE_VERSIONS_CACHE=0s`), and go asks each
+module's repository (`GOPROXY=direct`) rather than the proxy. scoop and brew update their
+buckets and taps on every check; the others ask their registries each time.
 
 A yarn or pnpm that is only corepack's shim, with the manager itself never downloaded, counts
 as not installed; bump asks the shim rather than guessing from where it is installed.

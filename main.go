@@ -130,7 +130,8 @@ func (e missingError) Error() string { return string(e) }
 
 // ask gets a package manager's outdated packages; a missing tool or a crash in its parser
 // comes back as an error like any other, so one manager never takes the others down.
-func ask(s source) (pkgs []pkg, err error) {
+// ask is what s has outdated; fresh asks past its caches, where it has any.
+func ask(s source, fresh bool) (pkgs []pkg, err error) {
 	if why := s.missing(); why != "" {
 		return nil, missingError(why)
 	}
@@ -148,7 +149,11 @@ func ask(s source) (pkgs []pkg, err error) {
 			err = missingError("not installed (only corepack's shim): corepack install -g " + s.corepack)
 		}
 	}()
-	pkgs, err = s.outdated()
+	lookup := s.outdated
+	if fresh && s.fresh != nil {
+		lookup = s.fresh
+	}
+	pkgs, err = lookup()
 	return slices.DeleteFunc(pkgs, func(p pkg) bool { return !cfg.keep(p) }), err
 }
 
@@ -164,7 +169,7 @@ func gather(srcs []source) []pkg {
 	found := map[string][]pkg{}
 	for _, s := range srcs {
 		wg.Go(func() {
-			pkgs, err := ask(s)
+			pkgs, err := ask(s, false)
 			mu.Lock()
 			defer mu.Unlock()
 			if _, missing := err.(missingError); missing {

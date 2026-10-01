@@ -9,6 +9,8 @@ import (
 	"io"
 	"strings"
 
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -112,11 +114,11 @@ func (p *picker) view(spin string) string {
 	case p.err != nil:
 		body = p.list.Title + "\n\n" + styleErr.Render(ansi.Truncate(p.err.Error(), p.list.Width(), "…"))
 	}
-	hint := "↑/k ↓/j move · / filter · enter choose · esc cancel"
+	hint := help.New().ShortHelpView([]key.Binding{keyMove, keyFilter, keyPickChoose, keyPickCancel})
 	if sourceNamed(p.row.Source).name == "mise" {
-		hint = "a chosen version is written to mise's global config\n" + hint
+		hint = styleDim.Render("a chosen version is written to mise's global config") + "\n" + hint
 	}
-	return stylePicker.Render(body + "\n\n" + styleDim.Render(hint))
+	return stylePicker.Render(body + "\n\n" + hint)
 }
 
 func (m model) openPicker(r *row) (tea.Model, tea.Cmd) {
@@ -149,13 +151,13 @@ func (m model) openPicker(r *row) (tea.Model, tea.Cmd) {
 func (m model) updatePicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	p := m.picker
 	if !p.list.SettingFilter() {
-		switch msg.String() {
-		case "esc", "q":
+		switch {
+		case key.Matches(msg, keyPickCancel):
 			if !p.list.IsFiltered() {
 				m.picker = nil
 				return m, nil
 			}
-		case "enter":
+		case key.Matches(msg, keyPickChoose):
 			if it, ok := p.list.SelectedItem().(pickItem); ok {
 				p.row.picked, p.row.target = true, it.Version
 				if it.Version == p.row.Latest {
@@ -181,16 +183,16 @@ func (m model) quitDialog() string {
 		"",
 		fmt.Sprintf("%d picked package%s will not be upgraded.", n, map[bool]string{true: "", false: "s"}[n == 1]),
 		"",
-		styleDim.Render("y/q quit · n/esc stay")))
+		m.help.ShortHelpView([]key.Binding{keyQuitYes, keyQuitNo})))
 }
 
 // The quit dialog only answers the question: y/q quit, n/esc stay. Every other key is
 // ignored while it is open.
 func (m model) updateQuit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "y", "q":
+	switch {
+	case key.Matches(msg, keyQuitYes):
 		return m, tea.Quit
-	case "n", "esc":
+	case key.Matches(msg, keyQuitNo):
 		m.confirmQuit = false
 	}
 	return m, nil
@@ -242,10 +244,10 @@ func (m model) startReview() (tea.Model, tea.Cmd) {
 
 // The review: scroll it, start the run, or go back and change something.
 func (m model) updateReview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "enter", "s":
+	switch {
+	case key.Matches(msg, keyReviewStart):
 		return m.start()
-	case "esc", "q", "left", "h":
+	case key.Matches(msg, keyReviewBack):
 		m.reviewing = false
 		return m, nil
 	}
@@ -256,7 +258,7 @@ func (m model) updateReview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m model) viewReview() string {
 	title := styleTabOn.Render("Review") + styleDim.Render(fmt.Sprintf(" · %d to upgrade", len(m.chosen())))
-	help := styleDim.Render("enter/s start · esc/q back to the list · ↑/k ↓/j scroll")
+	help := m.help.ShortHelpView([]key.Binding{keyReviewStart, keyReviewBack, keyScroll})
 	return stylePanel.BorderForeground(colorAccent).Width(m.w).Height(m.h).Render(
 		title + "\n\n" + m.review.View() + "\n" + help)
 }
@@ -325,10 +327,10 @@ func (m model) updateJobs(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.running {
 		return m, nil
 	}
-	switch msg.String() {
-	case "q":
+	switch {
+	case key.Matches(msg, keyDoneQuit):
 		return m, tea.Quit
-	case "enter", "esc":
+	case key.Matches(msg, keyDoneBack):
 		// Back to the table without what was upgraded; the failures stay, unpicked.
 		done := map[string]bool{}
 		for _, j := range m.jobs {
@@ -361,10 +363,10 @@ func (m model) viewJobs() string {
 		}
 	}
 	title := fmt.Sprintf("Upgrading %d of %d", min(done+1, len(m.jobs)), len(m.jobs))
-	help := "ctrl+c abort"
+	help := m.help.ShortHelpView([]key.Binding{keyForceQuit})
 	if !m.running {
 		title = fmt.Sprintf("Done: %d upgraded, %d failed", done-failed, failed)
-		help = "enter/esc back to the list · q quit"
+		help = m.help.ShortHelpView([]key.Binding{keyDoneBack, keyDoneQuit})
 		if done < len(m.jobs) {
 			title += fmt.Sprintf(", %d not run", len(m.jobs)-done)
 		}
@@ -395,6 +397,6 @@ func (m model) viewJobs() string {
 		m.progress.ViewAs(float64(done)/float64(max(len(m.jobs), 1))) + "\n\n" +
 		strings.Join(lines, "\n")
 	inner := m.h - stylePanel.GetVerticalFrameSize()
-	body += strings.Repeat("\n", max(inner-lipgloss.Height(body), 0)) + styleDim.Render(help)
+	body += strings.Repeat("\n", max(inner-lipgloss.Height(body), 0)) + help
 	return stylePanel.BorderForeground(colorAccent).Width(m.w).Height(m.h).Render(body)
 }

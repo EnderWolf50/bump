@@ -6,10 +6,12 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -87,7 +89,33 @@ func (b goBinary) fromSource() bool {
 	return b.module == "" || b.version == "" || b.version == "(devel)" || strings.Contains(b.version, "+dirty")
 }
 
-func goOutdated() ([]pkg, error) {
+func goOutdated() ([]pkg, error) { return goOutdatedFrom(proxyLatest) }
+
+// goFresh asks each module's repository, not the proxy, whose @latest lags a new tag for a
+// while.
+func goFresh() ([]pkg, error) { return goOutdatedFrom(directLatest) }
+
+// proxyLatest is a module's latest version as the module proxy has it.
+func proxyLatest(module string) (string, error) {
+	var latest struct{ Version string }
+	err := getJSON(goProxy(module, "@latest"), &latest)
+	return latest.Version, err
+}
+
+// directLatest is a module's latest version as its repository has it (GOPROXY=direct).
+func directLatest(module string) (string, error) {
+	c := exec.Command("go", "list", "-m", "-json", module+"@latest")
+	c.Dir = os.TempDir() // not inside some module that would get in the way
+	c.Env = append(os.Environ(), "GOPROXY=direct")
+	out, err := outputOf(c)
+	if err != nil {
+		return "", err
+	}
+	var latest struct{ Version string }
+	return latest.Version, json.Unmarshal(out, &latest)
+}
+
+func goOutdatedFrom(latestOf func(module string) (string, error)) ([]pkg, error) {
 	dirs := goBinDirs()
 	if len(dirs) == 0 {
 		return nil, nil
@@ -103,12 +131,12 @@ func goOutdated() ([]pkg, error) {
 			continue // the first folder wins when a program is in two
 		}
 		seen[b.path] = true
-		var latest struct{ Version string }
-		if err := getJSON(goProxy(b.module, "@latest"), &latest); err != nil {
+		latest, err := latestOf(b.module)
+		if err != nil {
 			return nil, err
 		}
-		if latest.Version != "" && compareVersions(latest.Version, b.version) > 0 {
-			pkgs = append(pkgs, pkg{Source: "go", ID: b.path, Current: b.version, Latest: latest.Version,
+		if latest != "" && compareVersions(latest, b.version) > 0 {
+			pkgs = append(pkgs, pkg{Source: "go", ID: b.path, Current: b.version, Latest: latest,
 				Module: b.module, Dir: filepath.Dir(b.file)})
 		}
 	}

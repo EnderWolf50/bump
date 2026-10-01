@@ -39,6 +39,7 @@ type source struct {
 	hint      string   // how to install it, shown when it is missing
 	corepack  string   // what `corepack install -g` takes, for managers corepack can shim
 	outdated  func() ([]pkg, error)
+	fresh     func() ([]pkg, error)                // outdated past the caches, for R; nil when outdated is fresh
 	upgrade   func(p pkg, version string) []string // version "" means the latest
 	versions  func(pkg) ([]release, error)         // newest first; nil when only the latest installs
 	info      func(pkg) (details, error)           // may be nil
@@ -70,7 +71,7 @@ func withVersion(args []string, version string) []string {
 
 var sources = []source{
 	{name: "winget", bin: "winget", platforms: []string{"windows"}, hint: "ships with Windows (App Installer in the Store)",
-		outdated: wingetOutdated, info: wingetInfo, versions: wingetVersions,
+		outdated: wingetOutdated, fresh: wingetFresh, info: wingetInfo, versions: wingetVersions,
 		upgrade: func(p pkg, v string) []string {
 			return withVersion([]string{"winget", "upgrade", "--id", p.ID, "--exact",
 				"--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"}, v)
@@ -90,7 +91,7 @@ var sources = []source{
 		}},
 	{name: "mise", bin: "mise",
 		hint:     byOS(map[string]string{"windows": "winget install jdx.mise", "darwin": "brew install mise", "": "https://mise.jdx.dev"}),
-		outdated: miseOutdated, versions: miseVersions,
+		outdated: miseOutdated, fresh: miseFresh, versions: miseVersions,
 		// A chosen version is written into the global config, like `mise use` does by hand.
 		upgrade: func(p pkg, v string) []string {
 			if v == "" {
@@ -128,7 +129,7 @@ var sources = []source{
 		outdated: cargoOutdated, info: cratesInfo, versions: cratesVersions,
 		upgrade: func(p pkg, v string) []string { return withVersion([]string{"cargo", "install", p.ID}, v) }},
 	{name: "go", bin: "go", hint: "mise use -g go",
-		outdated: goOutdated, info: goInfo, versions: goVersions, upgrade: goInstall},
+		outdated: goOutdated, fresh: goFresh, info: goInfo, versions: goVersions, upgrade: goInstall},
 }
 
 func sourceNamed(name string) source {
@@ -366,9 +367,25 @@ func parseBrew(out []byte) ([]pkg, error) {
 	return pkgs, nil
 }
 
-func miseOutdated() ([]pkg, error) {
+// wingetFresh updates winget's sources first: winget otherwise answers from a copy it
+// refreshes only now and then.
+func wingetFresh() ([]pkg, error) {
+	output("winget", "source", "update", "--disable-interactivity") // a failed update still leaves the old copy
+	return wingetOutdated()
+}
+
+func miseOutdated() ([]pkg, error) { return miseOutdatedWith() }
+
+// miseFresh asks mise past its cache of each tool's versions, kept an hour by default.
+func miseFresh() ([]pkg, error) { return miseOutdatedWith("MISE_FETCH_REMOTE_VERSIONS_CACHE=0s") }
+
+func miseOutdatedWith(env ...string) ([]pkg, error) {
 	// --bump also lists tools held back by the version in the config; `bump` is set on those.
-	out, err := output("mise", "outdated", "--bump", "--json")
+	c := exec.Command("mise", "outdated", "--bump", "--json")
+	if env != nil {
+		c.Env = append(os.Environ(), env...)
+	}
+	out, err := outputOf(c)
 	if err != nil {
 		return nil, err
 	}
