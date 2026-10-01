@@ -27,8 +27,11 @@ type (
 
 // runJobs runs the upgrades one after another (package managers do not like
 // running twice at once) and reports every output line; it stops early when ctx is cancelled.
+// Those that fail for want of administrator rights run again at the end, all behind one prompt.
 func runJobs(ctx context.Context, jobs []job, ch chan<- tea.Msg) {
 	defer close(ch)
+	var admin []int
+	var adminArgs [][]string
 	for i, j := range jobs {
 		if ctx.Err() != nil {
 			return
@@ -36,11 +39,25 @@ func runJobs(ctx context.Context, jobs []job, ch chan<- tea.Msg) {
 		ch <- jobStartMsg{i}
 		args := j.upgrade(j.target)
 		out, err := runJob(ctx, i, args, ch)
-		if up := elevated(args); err != nil && up != nil && needsAdmin(out) {
-			ch <- jobLineMsg{i, "needs administrator rights, asking for them: " + strings.Join(up, " ")}
-			_, err = runJob(ctx, i, up, ch)
+		if err != nil && needsAdmin(out) {
+			ch <- jobLineMsg{i, "needs administrator rights: asking once the others are done"}
+			admin, adminArgs = append(admin, i), append(adminArgs, args)
+			continue
 		}
 		ch <- jobDoneMsg{i, err}
+	}
+	if len(admin) == 0 || ctx.Err() != nil {
+		return
+	}
+	for _, i := range admin {
+		ch <- jobLineMsg{i, "running as administrator"}
+	}
+	outs, errs := asAdmin(adminArgs)
+	for k, i := range admin {
+		for _, l := range lines(outs[k]) {
+			ch <- jobLineMsg{i, l}
+		}
+		ch <- jobDoneMsg{i, errs[k]}
 	}
 }
 
@@ -68,6 +85,20 @@ func runJob(ctx context.Context, i int, args []string, ch chan<- tea.Msg) (strin
 		}
 	}
 	return out.String(), <-done
+}
+
+// lines are the non-empty lines of out, as runJob reports them.
+func lines(out string) []string {
+	var ls []string
+	sc := bufio.NewScanner(strings.NewReader(out))
+	sc.Buffer(nil, 1<<20)
+	sc.Split(scanLines)
+	for sc.Scan() {
+		if t := strings.TrimSpace(ansi.Strip(sc.Text())); t != "" {
+			ls = append(ls, t)
+		}
+	}
+	return ls
 }
 
 // scanLines splits at \r as well as \n: progress bars redraw themselves with \r.

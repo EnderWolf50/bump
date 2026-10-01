@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"runtime"
+
 	"slices"
 	"strings"
 	"testing"
@@ -207,9 +207,5 @@ func TestElevateOnlyWhenAdminIsMissing(t *testing.T) {
 	}
 	if needsAdmin("A newer package version is available in a configured source, but it does not apply to your system or requirements.") {
 		t.Error("an unrelated failure taken for an admin one")
-	}
-	up := strings.Join(elevated([]string{"winget", "upgrade", "--id", "Microsoft.WSL", "--exact"}), " ")
-	if runtime.GOOS == "windows" && !strings.Contains(up, "Microsoft.WSL") {
-		t.Errorf("elevated = %q", up)
 	}
 }

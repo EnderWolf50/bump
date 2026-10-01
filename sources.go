@@ -228,20 +228,53 @@ func needsAdmin(out string) bool {
 	return strings.Contains(out, "0x80073d28") || strings.Contains(out, "administrator privileges are required")
 }
 
-// elevated is args run as administrator, nil where bump cannot ask for that. gsudo keeps the
-// output here; without it, Windows asks through UAC and runs it in a window of its own.
-func elevated(args []string) []string {
+// asAdmin runs every command as administrator behind a single prompt, one after another, and
+// returns each one's output and error. Only winget asks for it, so only Windows knows how:
+// the commands go in a batch file that UAC runs elevated, out of sight, each writing its
+// output and exit code to a file read back here.
+// ponytail: no live output while it runs; tail the log files if that is missed.
+func asAdmin(cmds [][]string) ([]string, []error) {
+	outs, errs := make([]string, len(cmds)), make([]error, len(cmds))
+	fail := func(err error) ([]string, []error) {
+		for i := range errs {
+			errs[i] = err
+		}
+		return outs, errs
+	}
 	if runtime.GOOS != "windows" {
-		return nil
+		return fail(fmt.Errorf("cannot run as administrator on %s", runtime.GOOS))
 	}
-	if _, err := exec.LookPath("gsudo"); err == nil {
-		return append([]string{"gsudo"}, args...)
+	dir, err := os.MkdirTemp("", "bump-admin")
+	if err != nil {
+		return fail(err)
 	}
-	quoted := make([]string, len(args)-1)
-	for i, a := range args[1:] {
-		quoted[i] = "'" + strings.ReplaceAll(a, "'", "''") + "'"
+	defer os.RemoveAll(dir)
+	file := func(i int, ext string) string { return filepath.Join(dir, fmt.Sprint(i)+ext) }
+	var bat strings.Builder
+	bat.WriteString("@echo off\r\n")
+	for i, args := range cmds {
+		// ponytail: arguments are ids, versions and flags; one holding a quote would break this.
+		fmt.Fprintf(&bat, "\"%s\" > \"%s\" 2>&1\r\n> \"%s\" echo %%errorlevel%%\r\n",
+			strings.Join(args, `" "`), file(i, ".log"), file(i, ".exit"))
 	}
-	return []string{"powershell", "-NoProfile", "-Command", fmt.Sprintf(
-		"exit (Start-Process '%s' -ArgumentList %s -Verb RunAs -Wait -PassThru).ExitCode",
-		args[0], strings.Join(quoted, ","))}
+	script := filepath.Join(dir, "upgrade.cmd")
+	if err := os.WriteFile(script, []byte(bat.String()), 0o644); err != nil {
+		return fail(err)
+	}
+	ps := fmt.Sprintf("Start-Process '%s' -Verb RunAs -WindowStyle Hidden -Wait -ErrorAction Stop",
+		strings.ReplaceAll(script, "'", "''"))
+	if err := exec.Command("powershell", "-NoProfile", "-Command", ps).Run(); err != nil {
+		return fail(fmt.Errorf("administrator rights refused"))
+	}
+	for i := range cmds {
+		log, _ := os.ReadFile(file(i, ".log"))
+		outs[i] = string(log)
+		switch code, err := os.ReadFile(file(i, ".exit")); {
+		case err != nil:
+			errs[i] = fmt.Errorf("did not run as administrator")
+		case strings.TrimSpace(string(code)) != "0":
+			errs[i] = fmt.Errorf("exit status %s", strings.TrimSpace(string(code)))
+		}
+	}
+	return outs, errs
 }

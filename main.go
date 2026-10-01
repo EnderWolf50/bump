@@ -196,21 +196,32 @@ func gather(srcs []source) []pkg {
 }
 
 // upgrade runs each upgrade in the foreground, skips pinned packages and carries on past
-// failures.
+// failures. Those that fail for want of administrator rights run again at the end, all
+// behind one prompt.
 func upgrade(pkgs []pkg) {
 	var failed []string
+	var admin [][]string
 	for _, p := range pkgs {
 		if p.Pin != "" {
 			continue
 		}
 		args := p.upgrade("")
 		out, err := runForeground(args)
-		if up := elevated(args); err != nil && up != nil && needsAdmin(out) {
-			args = up
-			_, err = runForeground(args)
-		}
-		if err != nil {
+		switch {
+		case err != nil && needsAdmin(out):
+			admin = append(admin, args)
+		case err != nil:
 			failed = append(failed, strings.Join(args, " "))
+		}
+	}
+	if len(admin) > 0 {
+		fmt.Printf("\n\x1b[1m> as administrator, after one prompt:\x1b[0m\n")
+		outs, errs := asAdmin(admin)
+		for i, args := range admin {
+			fmt.Printf("\n\x1b[1m> %s\x1b[0m\n%s", strings.Join(args, " "), outs[i])
+			if errs[i] != nil {
+				failed = append(failed, strings.Join(args, " ")+" (as administrator: "+errs[i].Error()+")")
+			}
 		}
 	}
 	if len(failed) > 0 {

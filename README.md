@@ -63,9 +63,8 @@ listed but never upgraded; bump shows how to unpin them. Scoop and brew can only
 latest version.
 
 A winget upgrade that fails only for want of administrator rights (a machine-wide MSIX such
-as Microsoft.WSL) is run again as administrator: through `gsudo` when it is on your `PATH`,
-keeping the output in bump, otherwise through a UAC prompt with the upgrade in a window of
-its own.
+as Microsoft.WSL) is run again as administrator once the others are done: all of them
+together, behind a single UAC prompt, with their output shown when they finish.
 
 ## Settings
 
