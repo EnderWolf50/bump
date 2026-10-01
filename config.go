@@ -34,6 +34,10 @@ ignore = []
 # the list.
 hide_pinned = false
 
+# More folders to look for programs from "go install" in, besides GOBIN and GOPATH's bin:
+# where you install them with another GOBIN, e.g. ["~/.local/bin"]. "~" is your home folder.
+go_bin_dirs = []
+
 # How long a package manager may take to answer before bump gives up on it.
 timeout = "3m"
 
@@ -65,6 +69,7 @@ type config struct {
 	Skip         []string      `toml:"skip"`
 	Ignore       []string      `toml:"ignore"`
 	HidePinned   bool          `toml:"hide_pinned"`
+	GoBinDirs    []string      `toml:"go_bin_dirs"`
 	Timeout      time.Duration `toml:"timeout"`
 	SidebarWidth int           `toml:"sidebar_width"`
 	Theme        theme         `toml:"theme"`
@@ -132,7 +137,7 @@ func loadConfig(path string) (config, error) {
 // a typo in a key or a value is an error, not a setting silently ignored.
 func parseConfig(base config, text string) (config, error) {
 	c := base
-	c.Skip, c.Ignore = nil, nil // toml writes a list over the base's in place, keeping its tail
+	c.Skip, c.Ignore, c.GoBinDirs = nil, nil, nil // toml writes a list over the base's in place, keeping its tail
 	md, err := toml.Decode(text, &c)
 	if err != nil {
 		return base, err
@@ -142,6 +147,9 @@ func parseConfig(base config, text string) (config, error) {
 	}
 	if !md.IsDefined("ignore") {
 		c.Ignore = base.Ignore
+	}
+	if !md.IsDefined("go_bin_dirs") {
+		c.GoBinDirs = base.GoBinDirs
 	}
 	if keys := md.Undecoded(); len(keys) > 0 {
 		var names []string
@@ -168,21 +176,15 @@ func parseConfig(base config, text string) (config, error) {
 	if c.SidebarWidth < 20 {
 		return base, errors.New("sidebar_width must be at least 20")
 	}
-	for key, value := range c.Theme.colors() {
+	// Only the colors text sets need checking: the base's were checked when it was read.
+	var set struct{ Theme map[string]string }
+	toml.Decode(text, &set) // decoded once above already, without an error
+	for key, value := range set.Theme {
 		if !validColor(value) {
 			return base, fmt.Errorf("theme.%s: %q is not \"#rrggbb\" or a number from 0 to 255", key, value)
 		}
 	}
 	return c, nil
-}
-
-func (t theme) colors() map[string]string {
-	return map[string]string{
-		"accent": t.Accent, "dim": t.Dim, "faint": t.Faint, "ok": t.OK, "bad": t.Bad,
-		"major": t.Major, "minor": t.Minor, "patch": t.Patch, "other": t.Other,
-		"row_cursor": t.RowCursor, "row_picked": t.RowPicked, "row_picked_cursor": t.RowPickedCursor,
-		"row_chosen": t.RowChosen, "row_chosen_cursor": t.RowChosenCursor,
-	}
 }
 
 var hexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)

@@ -43,10 +43,10 @@ table the outdated packages of the one selected, by name:
 | `←` `h` `esc` `q` | back to the sidebar |
 
 The go manager covers programs installed with `go install`: bump reads which module and
-version each binary in GOBIN, GOPATH's bin and ~/.local/bin was built from, asks the Go
-module proxy for newer versions, and installs the new one into the same folder. Binaries
-built from a checkout (`go build`) have no released version to compare, so they are left
-out. On the first check a release can take a few minutes to show, while the proxy's cache
+version each binary in GOBIN, GOPATH's bin and the folders in the `go_bin_dirs` setting was
+built from, asks the Go module proxy for newer versions, and installs the new one into the
+same folder. Binaries built from a checkout (`go build`) have no released version to
+compare, so they are left out. On the first check a release can take a few minutes to show, while the proxy's cache
 catches up; `R` asks each module's repository instead.
 
 The first check is quick and may answer from caches; `R` asks again past them, where a
@@ -71,8 +71,9 @@ bump --default-config > ~/.config/bump/config.toml
 ```
 
 It covers the theme colors, managers to `skip`, packages to `ignore`
-(`"winget:Microsoft.VisualStudio.2022.BuildTools"`), `hide_pinned`, the per-manager
-`timeout` and the sidebar width. A mistyped key or value stops bump with a message naming it.
+(`"winget:Microsoft.VisualStudio.2022.BuildTools"`), `hide_pinned`, more folders of
+`go install` programs (`go_bin_dirs = ["~/.local/bin"]`, for a GOBIN other than go's own),
+the per-manager `timeout` and the sidebar width. A mistyped key or value stops bump with a message naming it.
 
 ## License
 

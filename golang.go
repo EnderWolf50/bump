@@ -20,8 +20,9 @@ type goBinary struct {
 	file, path, module, version string
 }
 
-// goBinDirs is where `go install` puts programs: GOBIN, GOPATH's bin, and ~/.local/bin,
-// which is where this setup installs them (mise points GOBIN at a folder per Go version).
+// goBinDirs is where `go install` puts programs: GOBIN, GOPATH's bin, and the folders in
+// the go_bin_dirs setting, for programs installed with another GOBIN than go's own (mise
+// points GOBIN at a folder per Go version).
 func goBinDirs() []string {
 	var dirs []string
 	add := func(d string) {
@@ -49,8 +50,12 @@ func goBinDirs() []string {
 			}
 		}
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		add(filepath.Join(home, ".local", "bin"))
+	home, _ := os.UserHomeDir()
+	for _, d := range cfg.GoBinDirs {
+		if rest, ok := strings.CutPrefix(d, "~"); ok && home != "" {
+			d = home + rest
+		}
+		add(d)
 	}
 	return dirs
 }

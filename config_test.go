@@ -13,6 +13,7 @@ func TestConfigOverridesOnlyWhatItNames(t *testing.T) {
 	os.WriteFile(path, []byte(`
 skip = ["cargo"]
 timeout = "90s"
+go_bin_dirs = ["~/bin"]
 [theme]
 accent = "#112233"
 major = "196"
@@ -21,8 +22,8 @@ major = "196"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(c.Skip, ",") != "cargo" || c.Timeout != 90*time.Second {
-		t.Errorf("skip %v, timeout %v", c.Skip, c.Timeout)
+	if strings.Join(c.Skip, ",") != "cargo" || c.Timeout != 90*time.Second || strings.Join(c.GoBinDirs, ",") != "~/bin" {
+		t.Errorf("skip %v, timeout %v, go_bin_dirs %v", c.Skip, c.Timeout, c.GoBinDirs)
 	}
 	if c.Theme.Accent != "#112233" || c.Theme.Major != "196" {
 		t.Errorf("theme not applied: %+v", c.Theme)
