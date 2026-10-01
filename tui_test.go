@@ -209,7 +209,7 @@ func TestRefreshKeepsChoices(t *testing.T) {
 	m = next.(model)
 	m, _ = press(m, "enter")
 	m, _ = press(m, "space")
-	m, _ = press(m, "r")
+	m, _ = press(m, "R")
 	if !m.tabs[1].loading {
 		t.Fatal("r did not start a new check")
 	}

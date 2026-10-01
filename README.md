@@ -38,7 +38,7 @@ table the outdated packages of the one selected:
 | `a` | pick everything shown |
 | `/` | filter by name or manager |
 | `o` | open the package's release notes or home page |
-| `r` | check the selected manager again |
+| `R` | check the selected manager again |
 | `s` | save: review the upgrades, then run them |
 | `←` `h` `esc` `q` | back to the sidebar |
 

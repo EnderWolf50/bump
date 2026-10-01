@@ -25,8 +25,8 @@ import (
 func sideWidth() int { return cfg.SidebarWidth }
 
 // Lines of the right panel around the table: heading and filter above; a blank, the
-// divider, two detail lines and the help below.
-const tableChrome = 7
+// divider and two detail lines below. The help takes as many more as it needs.
+const tableChrome = 6
 
 var bumpName = map[int]string{bumpMajor: "major", bumpMinor: "minor", bumpPatch: "patch", bumpOther: "?"}
 
@@ -114,23 +114,24 @@ var (
 	keyOpen     = key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open page"))
 	keySave     = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save"))
 	keyBack     = key.NewBinding(key.WithKeys("left", "h", "esc", "q"), key.WithHelp("←/h/esc/q", "back"))
-	keyRefresh  = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh"))
+	keyRefresh  = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh"))
 )
 
 type model struct {
-	tabs    []tabState
-	on      int  // the sidebar's selection
-	inList  bool // focus: the package table (true) or the sidebar
-	rows    []*row
-	shown   []*row // the rows in the table: the selected manager's, narrowed by the filter
-	table   table.Model
-	filter  textinput.Model
-	help    help.Model
-	spinner spinner.Model
-	started time.Time
-	infos   map[string]*info
-	w, h    int    // terminal size
-	status  string // a one-off note next to the heading, cleared by the next key
+	tabs     []tabState
+	on       int  // the sidebar's selection
+	inList   bool // focus: the package table (true) or the sidebar
+	rows     []*row
+	shown    []*row // the rows in the table: the selected manager's, narrowed by the filter
+	table    table.Model
+	filter   textinput.Model
+	help     help.Model
+	helpRows int // lines the help takes at this width
+	spinner  spinner.Model
+	started  time.Time
+	infos    map[string]*info
+	w, h     int    // terminal size
+	status   string // a one-off note next to the heading, cleared by the next key
 
 	// At most one of these is open, over or instead of the picking screen.
 	confirmQuit bool           // the quit dialog
@@ -336,7 +337,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		width := m.w - sideWidth() - frameW
 		m.table.SetColumns(columns(width))
 		m.table.SetWidth(width)
-		m.table.SetHeight(m.h - frameH - tableChrome)
+		m.helpRows = len(helpLines(m.help, width, m.helpGroups()...))
+		m.table.SetHeight(max(m.h-frameH-tableChrome-m.helpRows, 1))
 		m.filter.SetWidth(width - 2)
 		m.help.SetWidth(width)
 		m.progress.SetWidth(m.w - frameW)
@@ -432,7 +434,7 @@ func (m model) updateSide(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "s":
 		return m.startReview()
-	case "r":
+	case "R":
 		return m, m.check(m.tabs[m.on].name)
 	case "up", "k":
 		if m.on > 0 {
@@ -608,7 +610,7 @@ func (m model) viewPick() string {
 	// bottom. (The filler string adds one line more than its newlines.)
 	foot := []string{"checked " + m.lastChecked().Format("15:04")}
 	if !m.inList {
-		foot = append(foot, "", "↑/k      up", "↓/j      down", "→/enter  open", "r        refresh", "s        save", "esc/q    quit")
+		foot = append(foot, "", "↑/k      up", "↓/j      down", "→/enter  open", "R        refresh", "s        save", "esc/q    quit")
 	}
 	inner := m.h - sideStyle.GetVerticalFrameSize()
 	side = append(side, strings.Repeat("\n", max(inner-len(side)-len(foot)-1, 0)))
@@ -686,7 +688,7 @@ func (m model) viewList() string {
 		note = []string{t.name + " cannot be checked", styleDim.Render(t.err.Error())}
 	case t.err != nil:
 		note = []string{styleErr.Render(t.name + " could not be checked"), styleDim.Render(t.err.Error()),
-			"", styleDim.Render("r refreshes")}
+			"", styleDim.Render("R refreshes")}
 	case len(m.shown) == 0 && m.filter.Value() != "":
 		note = []string{styleDim.Render("nothing matches the filter"), styleDim.Render("esc clears it")}
 	case len(m.shown) == 0 && !m.busy():
@@ -699,13 +701,19 @@ func (m model) viewList() string {
 		body = lipgloss.Place(width, lipgloss.Height(body), lipgloss.Center, lipgloss.Center, strings.Join(note, "\n"))
 	}
 
-	keys := []key.Binding{m.table.KeyMap.LineUp, m.table.KeyMap.LineDown, keyPick, keyVersions,
-		keySave, keyBack, keyAll, keyFilter, keyOpen, keyRefresh}
+	// While the filter is typed its own keys take the help's lines.
+	help := helpLines(m.help, width, m.helpGroups()...)
 	if m.filter.Focused() {
-		keys = []key.Binding{
+		help = helpLines(m.help, width, []key.Binding{
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "keep filter")),
 			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter")),
-		}
+		})
+	}
+	for len(help) < m.helpRows {
+		help = append(help, "")
+	}
+	for i := range help {
+		help[i] = ansi.Truncate(help[i], width, "…")
 	}
 	return strings.Join([]string{
 		ansi.Truncate(heading, width, "…"),
@@ -713,7 +721,7 @@ func (m model) viewList() string {
 		body, "",
 		styleFaint.Render(strings.Repeat("─", width)),
 		strings.Join(detail, "\n"),
-		ansi.Truncate(m.help.ShortHelpView(keys), width, "…"),
+		strings.Join(help, "\n"),
 	}, "\n")
 }
 
