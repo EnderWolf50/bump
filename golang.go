@@ -175,12 +175,12 @@ func goVersions(p pkg) ([]release, error) {
 	}
 	defer body.Close()
 	// Every Go version starts with "v", and a module from before modules with a major version
-	// past 1 ends in "+incompatible": neither makes it a prerelease.
+	// past 1 ends in "+incompatible", which isPrerelease ignores like any build metadata.
 	var rs []release
 	sc := bufio.NewScanner(io.LimitReader(body, 1<<20))
 	for sc.Scan() {
 		v := strings.TrimSpace(sc.Text())
-		if v != "" && !isPrerelease(strings.TrimSuffix(strings.TrimPrefix(v, "v"), "+incompatible")) {
+		if v != "" && !isPrerelease(strings.TrimPrefix(v, "v")) {
 			rs = append(rs, release{Version: v})
 		}
 	}

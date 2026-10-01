@@ -80,8 +80,12 @@ var prerelease = regexp.MustCompile(`-|[a-zA-Z]`)
 
 // isPrerelease is the one rule for every registry: semver (npm, crates.io, NuGet, Go) puts
 // letters only after a "-" or "+", and Python marks prereleases with letters, so a stable
-// version is numbers and dots everywhere. winget is the exception and is not filtered.
-func isPrerelease(v string) bool { return prerelease.MatchString(v) }
+// version is numbers and dots everywhere. Build metadata after a "+" ("1.0.0+abc",
+// "v2.0.0+incompatible") is not a prerelease. winget is the exception and is not filtered.
+func isPrerelease(v string) bool {
+	v, _, _ = strings.Cut(v, "+")
+	return prerelease.MatchString(v)
+}
 
 func stable(vs []string) []release {
 	var out []release
