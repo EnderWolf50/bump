@@ -1,7 +1,6 @@
 package main
 
 import (
-	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -92,97 +91,6 @@ func stable(vs []string) []release {
 		}
 	}
 	return out
-}
-
-func wingetVersions(p pkg) ([]release, error) {
-	out, err := output("winget", "show", "--id", p.ID, "--exact", "--versions", "--disable-interactivity", "--accept-source-agreements")
-	if err != nil {
-		return nil, err
-	}
-	// "Version", a "-----" rule, then one version per line. winget versions may hold letters
-	// ("1.21.14b"), so nothing is dropped as a prerelease here.
-	var rs []release
-	seenRule := false
-	for _, line := range strings.Split(strings.ReplaceAll(string(out), "\r", ""), "\n") {
-		line = strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(line, "---"):
-			seenRule = true
-		case seenRule && line != "":
-			rs = append(rs, release{Version: line})
-		}
-	}
-	return newer(rs, p.Current), nil
-}
-
-func miseVersions(p pkg) ([]release, error) {
-	out, err := output("mise", "ls-remote", p.ID)
-	if err != nil {
-		return nil, err
-	}
-	return newer(stable(strings.Fields(string(out))), p.Current), nil
-}
-
-// npmVersions serves npm, pnpm, yarn and bun: they all install from the npm registry.
-func npmVersions(p pkg) ([]release, error) {
-	var doc struct{ Time map[string]time.Time }
-	if err := getJSON("https://registry.npmjs.org/"+url.PathEscape(p.ID), &doc); err != nil {
-		return nil, err
-	}
-	var rs []release
-	for v, t := range doc.Time {
-		if !isPrerelease(v) { // also skips the "created" and "modified" keys
-			rs = append(rs, release{v, t})
-		}
-	}
-	return newer(rs, p.Current), nil
-}
-
-func pypiVersions(p pkg) ([]release, error) {
-	var doc struct {
-		Releases map[string][]struct {
-			Uploaded time.Time `json:"upload_time_iso_8601"`
-		}
-	}
-	if err := getJSON("https://pypi.org/pypi/"+url.PathEscape(p.ID)+"/json", &doc); err != nil {
-		return nil, err
-	}
-	var rs []release
-	for v, files := range doc.Releases {
-		if isPrerelease(v) || len(files) == 0 {
-			continue
-		}
-		rs = append(rs, release{v, files[0].Uploaded})
-	}
-	return newer(rs, p.Current), nil
-}
-
-func nugetVersions(p pkg) ([]release, error) {
-	var idx struct{ Versions []string }
-	if err := getJSON("https://api.nuget.org/v3-flatcontainer/"+strings.ToLower(p.ID)+"/index.json", &idx); err != nil {
-		return nil, err
-	}
-	return newer(stable(idx.Versions), p.Current), nil
-}
-
-func cratesVersions(p pkg) ([]release, error) {
-	var doc struct {
-		Versions []struct {
-			Num       string
-			CreatedAt time.Time `json:"created_at"`
-			Yanked    bool
-		}
-	}
-	if err := getJSON("https://crates.io/api/v1/crates/"+p.ID+"/versions", &doc); err != nil {
-		return nil, err
-	}
-	var rs []release
-	for _, v := range doc.Versions {
-		if !v.Yanked && !isPrerelease(v.Num) {
-			rs = append(rs, release{v.Num, v.CreatedAt})
-		}
-	}
-	return newer(rs, p.Current), nil
 }
 
 // shortcuts are the newest patch, minor and major release among rs (newest first), each
